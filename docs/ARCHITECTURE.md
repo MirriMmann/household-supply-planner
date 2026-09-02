@@ -443,7 +443,7 @@ src/
         └── market/
 ```
 
-Фактическое Python package name фиксируется перед началом M1.
+Python package name зафиксирован в M1: `household_supply`.
 
 ---
 

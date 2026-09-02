@@ -15,10 +15,15 @@ class CurrencyMismatchError(ValueError):
 def as_decimal(value: DecimalLike) -> Decimal:
     if isinstance(value, bool):
         raise TypeError("boolean is not a valid decimal value")
+    if isinstance(value, float):
+        raise TypeError("float is not accepted; use Decimal, int, or str")
     try:
-        return value if isinstance(value, Decimal) else Decimal(str(value))
+        result = value if isinstance(value, Decimal) else Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise ValueError(f"invalid decimal value: {value!r}") from exc
+    if not result.is_finite():
+        raise ValueError(f"decimal value must be finite: {value!r}")
+    return result
 
 
 @dataclass(frozen=True, slots=True)

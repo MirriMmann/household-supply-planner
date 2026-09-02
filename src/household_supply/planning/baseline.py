@@ -5,7 +5,6 @@ from decimal import Decimal, ROUND_CEILING
 from itertools import product
 
 from household_supply.domain import (
-    Demand,
     Money,
     PlanStatus,
     PlanningProblem,
@@ -16,14 +15,7 @@ from household_supply.domain import (
     RequirementCoverage,
 )
 
-
-@dataclass(frozen=True, slots=True)
-class _Requirement:
-    item_id: str
-    required: Quantity
-    inventory_available: Quantity
-    inventory_used: Quantity
-    net_required: Quantity
+from .compile import CompiledRequirement, compile_requirements
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,80 +28,15 @@ class _ItemSolution:
 _MAX_COMBINATIONS_PER_ITEM = 200_000
 
 
-def _aggregate_demands(demands: tuple[Demand, ...]) -> dict[str, Quantity]:
-    aggregated: dict[str, Quantity] = {}
-    for demand in demands:
-        base = demand.quantity.as_base()
-        previous = aggregated.get(demand.item.id)
-        if previous is None:
-            aggregated[demand.item.id] = base
-            continue
-        if not previous.compatible_with(base):
-            raise ValueError(
-                f"incompatible demand units for item {demand.item.id}: "
-                f"{previous.unit} and {base.unit}"
-            )
-        aggregated[demand.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
-    return aggregated
-
-
-def _aggregate_inventory(problem: PlanningProblem) -> dict[str, Quantity]:
-    aggregated: dict[str, Quantity] = {}
-    for lot in problem.inventory.lots:
-        base = lot.quantity.as_base()
-        previous = aggregated.get(lot.item.id)
-        if previous is None:
-            aggregated[lot.item.id] = base
-            continue
-        if not previous.compatible_with(base):
-            raise ValueError(
-                f"incompatible inventory units for item {lot.item.id}: "
-                f"{previous.unit} and {base.unit}"
-            )
-        aggregated[lot.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
-    return aggregated
-
-
-def _requirements(problem: PlanningProblem) -> tuple[_Requirement, ...]:
-    demands = _aggregate_demands(problem.demands)
-    inventory = _aggregate_inventory(problem)
-    result: list[_Requirement] = []
-
-    for item_id in sorted(demands):
-        required = demands[item_id]
-        available = inventory.get(item_id, Quantity(0, required.base_unit))
-        if not required.compatible_with(available):
-            raise ValueError(
-                f"inventory unit for item {item_id} is incompatible with demand"
-            )
-        available = available.as_base()
-        used_amount = min(required.base_amount, available.base_amount)
-        net_amount = required.base_amount - used_amount
-        result.append(
-            _Requirement(
-                item_id=item_id,
-                required=required,
-                inventory_available=available,
-                inventory_used=Quantity(used_amount, required.base_unit),
-                net_required=Quantity(net_amount, required.base_unit),
-            )
-        )
-    return tuple(result)
-
-
 def _ceil_ratio(numerator: Decimal, denominator: Decimal) -> int:
     if denominator <= 0:
         raise ValueError("denominator must be positive")
     return int((numerator / denominator).to_integral_value(rounding=ROUND_CEILING))
 
 
-def _solve_item(problem: PlanningProblem, requirement: _Requirement) -> _ItemSolution | None:
+def _solve_item(
+    problem: PlanningProblem, requirement: CompiledRequirement
+) -> _ItemSolution | None:
     currency = problem.policy.budget.currency
     compatible_offers = []
     for offer in sorted(problem.market.offers, key=lambda candidate: candidate.id):
@@ -208,7 +135,7 @@ def _solve_item(problem: PlanningProblem, requirement: _Requirement) -> _ItemSol
 
 def build_plan(problem: PlanningProblem) -> ProcurementPlan:
     currency = problem.policy.budget.currency
-    requirements = _requirements(problem)
+    requirements = compile_requirements(problem)
     item_solutions: dict[str, _ItemSolution] = {}
     unavailable: list[str] = []
 

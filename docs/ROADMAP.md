@@ -100,7 +100,9 @@ ProcurementPlan
 
 ### Definition of Done
 
-> При фиксированных `InventorySnapshot`, `MarketSnapshot`, `DemandBundle` и `PlanningPolicy` система детерминированно строит валидный feasible procurement plan либо явно доказывает отсутствие допустимого плана.
+> При фиксированных `InventorySnapshot`, `MarketSnapshot`, `Demand` и `PlanningPolicy` система детерминированно строит валидный feasible procurement plan либо явно возвращает `infeasible` для отсутствующего market coverage или недостаточного hard budget.
+
+M1 validator независимо сверяет feasible plan с исходными requirements, точным `MarketSnapshot`, package arithmetic, budget и projected leftovers. Snapshot-ы отклоняют дублирующиеся lot/offer IDs.
 
 HTTP не является критерием готовности.
 

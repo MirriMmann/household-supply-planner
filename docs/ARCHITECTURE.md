@@ -440,6 +440,7 @@ Latest evidence является авторитетным по времени д
 
 ```text
 accepted
+unavailable
 superseded
 stale
 unresolved
@@ -465,9 +466,57 @@ MarketCompilationPolicy
 
 и при создании повторно выводит ожидаемые dispositions и `MarketSnapshot`. Поэтому compilation record нельзя вручную собрать с поддельным `RESOLVED`, неверным latest selection, изменённым Offer ID/source_ref или другим planner-facing фактом, который не следует из сохранённой basis. Это делает `MarketCompilation` self-contained proof record, а не только контейнером результата.
 
-Unavailable latest observation тоже является валидным market state: она допускается как `Offer(available=False)`, после чего planner уже механически не рассматривает её как покупаемый candidate.
+Unavailable latest observation тоже является валидным market evidence. Если retailer сохраняет цену, она может быть представлена как `Offer(available=False)`. Если цена отсутствует, observation получает `unavailable` disposition и не создаёт Offer. В обоих случаях fallback к старой available цене запрещён.
 
 ---
+
+### 3.9.4 Real retailer adapter: Globus Online demo
+
+M5 добавляет первый конкретный adapter поверх M4, не меняя planner contract:
+
+```text
+Globus product page
+      ↓
+GlobusOnlineDemoProvider
+      ↓
+MarketAcquisitionBatch
+      ↓
+M4
+      ↓
+MarketSnapshot
+```
+
+`GlobusOnlineDemoProvider` принимает только заранее перечисленные canonical `/good/<id>` URLs. Он не выполняет fuzzy search, category crawling или автоматический catalog binding. Product ID берётся из exact URL, а переход к canonical SKU остаётся ответственностью `CatalogSnapshot`.
+
+Provider scope намеренно фиксирован:
+
+```text
+provider_id = globus-online-demo
+seller_id   = globus-online-demo
+```
+
+Публичная страница должна давать явное evidence addressless/demo scope: прямой marker `Это демо-каталог` либо официальный no-address state `Укажите адрес доставки` на той же Globus product surface. DOM-позиция marker не является частью контракта. Поэтому наблюдение нельзя случайно представить как address-specific store evidence. Address-scoped integration в будущем должна иметь отдельную attributable seller/provider boundary.
+
+HTTP mechanism ограничен:
+
+- только `https://globus-online.kg`;
+- только canonical product-page URLs;
+- redirect повторно валидируется и не может сменить product ID;
+- timeout обязателен;
+- response body имеет max-size bound;
+- принимается только HTML/XHTML;
+- inline script/style/template text не участвует в price/availability parsing.
+
+M5 поддерживает только piece-priced packaged listings. `сом/кг` отклоняется как unsupported semantics вместо ложного преобразования в условную упаковку 1 kg.
+
+Реальный retailer также потребовал уточнить M4 observation semantics:
+
+```text
+available=True  -> price обязателен
+available=False -> price может отсутствовать
+```
+
+Если latest resolved observation имеет `available=False` и `price=None`, она получает disposition `unavailable`, не создаёт `Offer` и всё равно supersede-ит старые observations. Поэтому отсутствие новой цены не разрешает resurrect старый покупаемый Offer.
 
 ### 3.10 PlanningPolicy
 
@@ -702,11 +751,31 @@ Binding/identifier/package conflict приводит к `conflict`, а не к �
 
 M1/M3 получают только canonical `MarketSnapshot`. API, scraper, JSON feed или retailer SDK не меняют planning semantics.
 
+### I21. Demo market scope не маскируется под реальный магазин
+
+`GlobusOnlineDemoProvider` имеет фиксированные provider/seller identity и принимает только страницы с явным demo marker. Address-specific availability требует отдельного attributable scope.
+
+### I22. Unavailable без цены не создаёт выдуманный Offer
+
+```text
+latest available=False + price=None
+        ↓
+unavailable disposition
+        ↓
+no Offer
+        ↓
+no fallback to older price
+```
+
+### I23. Unsupported retailer semantics fail closed
+
+M5 не преобразует `сом/кг` в фиктивную упаковку 1 kg. Пока variable-weight purchase semantics не описаны в planning core, такой listing отклоняется adapter-ом.
+
 ---
 
 ## 5. Модули
 
-Актуальная логическая структура после M4:
+Актуальная логическая структура после M5:
 
 ```text
 src/household_supply/
@@ -730,7 +799,9 @@ src/household_supply/
 ├── market/
 │   ├── provider.py       # MarketProvider acquisition boundary
 │   ├── resolve.py        # exact catalog resolution
-│   └── compile.py        # observations -> MarketCompilation/Snapshot
+│   ├── compile.py        # observations -> MarketCompilation/Snapshot
+│   └── providers/
+│       └── globus_online.py  # bounded M5 real-retailer adapter
 │
 └── planning/
     ├── compile.py       # Demand + inventory -> net requirements
@@ -742,7 +813,7 @@ src/household_supply/
     └── validate.py
 ```
 
-M4 сохраняет одностороннюю зависимость:
+M5 сохраняет одностороннюю зависимость:
 
 ```text
 external provider mechanism

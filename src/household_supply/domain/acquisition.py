@@ -26,7 +26,7 @@ class MarketObservation:
     provider_id: str
     seller_id: str
     external_product_id: str
-    price: Money
+    price: Money | None
     observed_at: datetime
     available: bool = True
     product_identifier: ProductIdentifier | None = None
@@ -48,7 +48,10 @@ class MarketObservation:
             raise ValueError("market observation seller_id must not be empty")
         if not external_product_id:
             raise ValueError("market observation external_product_id must not be empty")
-        if self.price.amount < 0:
+        if self.price is None:
+            if self.available:
+                raise ValueError("available market observation requires price")
+        elif self.price.amount < 0:
             raise ValueError("market observation price must not be negative")
         if not isinstance(self.available, bool):
             raise TypeError("market observation available must be bool")

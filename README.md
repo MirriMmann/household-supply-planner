@@ -200,48 +200,33 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M4 — Market Acquisition & Catalog Resolution реализован.**
+**M5 — Real Market Provider Vertical Slice реализован.**
 
-До M4 planner получал уже готовый `MarketSnapshot`. Теперь появился строгий слой, который доказывает, как внешние наблюдения вообще получают право стать каноническими `Offer`:
+M1–M4 доказали demand, procurement optimization и admission внешнего market evidence. M5 впервые подключает этот контракт к реальному публичному retailer surface: **Globus Online demo catalog**.
 
 ```text
-MarketProvider
-      ↓
+explicit Globus product URLs
+        ↓
+GlobusOnlineDemoProvider
+        ↓
 MarketAcquisitionBatch
-      ↓
-MarketObservation[]
-      +
-CatalogSnapshot
-      ↓
-Catalog Resolution
-      ↓
-Market Compilation
-      ↓
+        ↓
+M4 catalog resolution / compilation
+        ↓
 MarketSnapshot
-      ↓
+        ↓
 M1 / M3 planner
 ```
 
-M4 вводит важное разделение:
+Provider намеренно bounded: он не является crawler-ом, не ищет товары по строкам и не угадывает SKU. Caller явно перечисляет product pages, а их `external_product_id` затем связывается с каноническим SKU через существующий M4 `CatalogBinding`.
 
-```text
-MarketObservation != Offer
-external listing != SKU
-product title != product identity
-```
+Публичный Globus Online без адреса доставки помечает данные как **демо-каталог**, поэтому M5 фиксирует seller scope как `globus-online-demo` и отклоняет страницу без явного demo marker. Эти данные нельзя выдавать за ассортимент конкретного магазина или адреса.
 
-Внешняя запись допускается в planner только если её SKU identity доказана одним из двух способов:
+M5 также выявил реальное ограничение M4: sold-out listing может не публиковать цену. Поэтому `MarketObservation(price=None, available=False)` теперь допустим. Latest unpriced-unavailable observation блокирует fallback на старую цену, но не создаёт выдуманный `Offer`.
 
-- явный `CatalogBinding` для exact `(provider, seller, external_product_id)`;
-- точное совпадение `ProductIdentifier` (`GTIN`, `EAN`, `UPC` или другой явно названный namespace).
+На первом live slice поддерживаются только **packaged / piece-priced** товары. Страницы с `сом/кг` намеренно отклоняются: текущий procurement kernel оптимизирует целые упаковки и пока не моделирует произвольный весовой отпуск.
 
-Свободный текст вроде `"Milk 1L"`, похожее название бренда или одинаковый размер упаковки **не являются достаточным основанием для автоматического binding**. Если explicit binding, product identifier или package evidence противоречат друг другу, observation получает `conflict` и не попадает в `MarketSnapshot`.
-
-Для одной внешней listing identity M4 использует только последнее наблюдение. Старые записи остаются в `MarketCompilation` как `superseded`; stale observations можно исключать явной `MarketCompilationPolicy`; две конкурирующие latest-записи с одинаковым timestamp считаются конфликтом вместо произвольного выбора по порядку входа. Если именно latest evidence говорит `unavailable`, `unresolved` или `conflict`, compiler не откатывается к более старой удобной цене.
-
-Каждый admitted Offer сохраняет `OfferProvenance` с provider/listing identity, observation ID и source reference. Поэтому planner получает чистый snapshot, а acquisition layer сохраняет происхождение решения.
-
-`MarketCompilation` является не просто удобной парой `snapshot + dispositions`, а self-contained proof record: он сохраняет exact `CatalogSnapshot`, canonical acquisition batches и `MarketCompilationPolicy` и при создании повторно выводит ожидаемый результат из этой basis. Поэтому вручную подложенный `RESOLVED`, неверный Offer/provenance или неправильный temporal selection не может маскироваться под результат M4 compiler.
+HTTP остаётся adapter mechanism: live provider использует stdlib transport с timeout, bounded response size, content-type checks и pre-fetch redirect validation. В тестах transport заменяется deterministic fixture implementation.
 
 Подробнее:
 
@@ -250,7 +235,7 @@ product title != product identity
 
 ## Текущая исполнимая гарантия
 
-> При фиксированных external observations и `CatalogSnapshot` M4 детерминированно формирует attributable `MarketSnapshot`, не угадывает SKU identity по свободному тексту и не допускает unresolved/conflicting/stale evidence под видом рыночного факта. Полученный snapshot без специальных planner-paths используется замороженными M1/M3.
+> Явно перечисленные packaged product pages публичного Globus demo catalog могут быть получены live, преобразованы в attributable `MarketObservation`, допущены существующим M4 catalog/evidence boundary и без retailer-specific planner logic использованы M1/M3. Provider не выдаёт demo scope за реальный адресный ассортимент, не выдумывает цену sold-out товара и не маскирует весовые товары под целые упаковки.
 
 Проверка из активированного виртуального окружения:
 
@@ -261,8 +246,15 @@ python examples/m1_week_one.py
 python examples/m2_meal_demand.py
 python examples/m3_multi_objective.py
 python examples/m4_market_acquisition.py
+python examples/m5_globus_provider.py
 ```
 
-Проект использует `src/` layout, поэтому прямой запуск examples предполагает, что package установлен в окружение. Editable install выше одновременно делает локальные изменения сразу доступными examples и повторяет способ установки в CI.
+Опциональный **live smoke** (требует сети и обращается к публичному demo catalog):
 
-M1–M4 намеренно не содержат авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.
+```bash
+python examples/m5_globus_live.py
+```
+
+CI никогда не зависит от внешнего retailer: он запускает contract fixture M5, а live smoke остаётся отдельной проверкой адаптера.
+
+M1–M5 по-прежнему не требуют авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или LLM.

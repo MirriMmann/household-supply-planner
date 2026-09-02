@@ -223,9 +223,80 @@ Objective score может быть выше budget: soft penalties не явл�
 
 ---
 
-## M4 — Application Boundary
+## M4 — Market Acquisition & Catalog Resolution
 
-Только после стабильного ядра добавить внешний интерфейс.
+**Статус: реализован.**
+
+Цель: заменить предположение «planner уже получил правильные Offer» явной, проверяемой границей между внешними рыночными данными и каноническим `MarketSnapshot`.
+
+### Реализовано
+
+```text
+MarketProvider
+    ↓
+MarketAcquisitionBatch
+    ↓
+MarketObservation[]
+    +
+CatalogSnapshot
+    ↓
+resolve / compile
+    ↓
+MarketCompilation
+    ↓
+MarketSnapshot
+```
+
+Добавлены:
+
+- `ProductIdentifier`;
+- `ExternalListingKey`;
+- `CatalogBinding`;
+- `CatalogSnapshot`;
+- `MarketObservation`;
+- `MarketAcquisitionBatch`;
+- `MarketProvider` boundary и deterministic `StaticMarketProvider`;
+- `CatalogResolution`;
+- `MarketCompilationPolicy`;
+- `MarketObservationDisposition`;
+- `OfferProvenance`;
+- self-contained `MarketCompilation` basis (`CatalogSnapshot` + acquisition batches + policy);
+- `compile_market_snapshot()`.
+
+### Identity policy
+
+Автоматическое SKU resolution разрешено только по:
+
+1. exact external listing binding;
+2. exact global/product identifier match.
+
+```text
+free-text similarity != SKU identity
+package size alone != SKU identity
+external listing != canonical SKU
+```
+
+Если binding и identifier указывают на разные SKU, либо observed package materially отличается от resolved SKU, observation получает `conflict`.
+
+### Temporal policy
+
+- timestamps market evidence обязаны быть timezone-aware;
+- acquisition batch не может использоваться для snapshot, который исторически предшествует acquisition;
+- по одной listing identity допускается только latest observation;
+- older observations сохраняются как `superseded`;
+- stale threshold задаётся явно;
+- несколько latest observations на одном timestamp не разрешаются скрытым tie-break — это conflict;
+- latest `unavailable` / `unresolved` / `conflict` не вызывает fallback на более старое evidence.
+
+### Definition of Done
+
+> Фиксированный набор attributable external observations, Catalog и compilation policy детерминированно дают один self-validating `MarketCompilation`; только resolved и temporally admissible observations становятся `Offer`, exact derivation basis и provenance сохраняются, а resulting `MarketSnapshot` проходит через существующий M1/M3 planner без специальной market-adapter логики.
+
+---
+
+## M5 — Application Boundary
+
+Цель: добавить тонкую прикладную поверхность вокруг уже доказанных M1–M4 контрактов.
 
 Возможный первый API:
 
@@ -234,44 +305,15 @@ POST /plans
 GET  /plans/{id}
 ```
 
-API переводит transport schema в доменные типы и обратно.
+API должен только:
 
-Он не должен содержать planner logic.
+- разобрать transport schema;
+- вызвать существующие demand/market/planning boundaries;
+- сериализовать результат.
 
-На этом этапе можно решить, нужна ли persistence layer вообще и какая.
+Он не должен переносить planner logic, catalog resolution или market evidence policy в HTTP handlers.
 
----
-
-## M5 — Market Acquisition
-
-Цель: заменить fixture market реальными наблюдениями.
-
-Через интерфейс вроде:
-
-```text
-MarketProvider
-    -> MarketSnapshot
-```
-
-Возможные реализации:
-
-```text
-FixtureMarketProvider
-RetailerApiProvider
-ScraperProvider
-OpenDataProvider
-ReceiptImportProvider
-```
-
-### Обязательные свойства market data
-
-- источник;
-- timestamp;
-- seller;
-- SKU identity;
-- currency;
-- availability;
-- возможность пометить устаревшие данные.
+На этом этапе отдельно решается, нужна ли persistence layer для plans/catalog/observations и какая именно.
 
 ---
 

@@ -516,27 +516,90 @@ Recurring demand is derived directly from exact total consumption and exact obse
 
 ---
 
-## M9 — Natural Language Interface
+## M9 — Household Replenishment Workflow
 
-Только здесь появляется AI-интерпретация пользовательских запросов.
+**Статус: реализован.**
+
+Цель: собрать M2/M6/M7/M8 в первую household-aware planning operation без новой planning semantics.
+
+```text
+HouseholdHistory
++ horizon
++ explicit needs
++ budget
+        ↓
+HouseholdReplenishmentPreparation
+        ↓
+HouseholdState + estimates
+        ↓
+RecurringNeedSource / ExplicitNeedSource
+        ↓
+DemandCompilation
+        ↓
+ApplicationPlanRequest
+        ↓
+PlanLifecycleService
+        ↓
+persisted PlanRecord
+```
+
+### Реализовано
+
+- `HouseholdReplenishmentRequest`;
+- deterministic canonical explicit-needs ordering;
+- one-history / one-`as_of` preparation snapshot;
+- exact reuse of M8 state and learning;
+- recurring + explicit demand composition through M2;
+- inventory projection only for demanded Item IDs;
+- catalog identity validation before network acquisition;
+- learned missing-catalog Item fail-closed;
+- self-validating `HouseholdReplenishmentPreparation`;
+- self-validating `HouseholdReplenishmentResult` linked to exact M7 stored request;
+- `HouseholdReplenishmentService`;
+- strict `HouseholdReplenishmentJsonApi` on durable `/plans` surface;
+- existing M7 history GET routes preserved;
+- existing generic ASGI adapter reused unchanged;
+- executable offline M9 vertical slice.
+
+### Important semantics
+
+```text
+Plan != PurchaseEvent
+household snapshot != live mutable history during one run
+missing catalog need != silently ignored need
+unrelated household inventory != market catalog requirement
+```
+
+M9 не создаёт второй planner. Он materialize-ит household-derived inputs в существующий `ApplicationPlanRequest`, после чего M6/M3 остаются authoritative для market/planning semantics, а M7 — для plan persistence.
+
+### Definition of Done
+
+> Один household snapshot, planning horizon, budget и optional explicit needs можно детерминированно собрать в attributable replenishment demand, получить и сохранить existing-stack procurement plan, причём malformed/unsupported household needs прекращаются до external market acquisition, а recommendation не превращается автоматически в факт покупки.
+
+---
+
+## M10 — Natural Language Interface
+
+Только после доказанного M9 workflow появляется AI-интерпретация пользовательских запросов.
 
 Пример:
 
 ```text
-«Мне нужно прожить одному неделю на 3000 сом,
-рыбу не люблю, готовить хочу максимум раз в два дня»
+«Спланируй пополнение на неделю, бюджет 3000 сом,
+и добавь ещё литр масла»
             ↓
-candidate typed PlanRequest
+candidate HouseholdReplenishmentRequest
             ↓
 validation / clarification
             ↓
-existing deterministic system
+existing deterministic M9 workflow
 ```
 
 AI не получает право:
 
 - выдумывать цены;
-- считать итоговую стоимость вместо planner;
+- создавать `PurchaseEvent` из recommendation;
+- считать household consumption вместо M8 evidence model;
 - игнорировать hard constraints;
 - считать предложение магазина актуальным без market evidence.
 

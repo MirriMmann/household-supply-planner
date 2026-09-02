@@ -200,26 +200,52 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M2 — Demand Compilation & Meals реализован.**
+**M3 — Multi-objective Planning реализован.**
 
-M1 остаётся неизменным procurement-ядром, а M2 добавляет независимый слой происхождения потребности:
+Ядро теперь разделяет три разные стадии принятия решения:
 
-- точные `Money` на `Decimal`;
-- нормализованные `Quantity` и совместимые единицы измерения;
-- разделение `Item / SKU / Offer`;
-- `InventorySnapshot` и `MarketSnapshot`;
-- bounded package-aware baseline planner;
-- `Recipe` / `RecipeIngredient` / `MealRequest`;
-- `DemandSource` как отдельная граница;
-- `DemandContribution` с явными `source_id` и `contribution_id`;
-- `MealDemandSource` и `ExplicitNeedSource`;
-- детерминированное масштабирование порций без `float` и без зависимости от глобального `decimal` context;
-- aggregation одинаковых Items между рецептами и разными sources;
-- сохранение атрибутируемых contributions рядом с нормализованным `Demand[]`;
-- inventory reconciliation выполняется только после demand compilation;
-- существующий M1 planner не знает, откуда появился demand.
+```text
+Demand Sources
+      ↓
+Demand Compilation                 M2
+      ↓
+Net Requirements
+      ↓
+Purchase Candidate Generation
+      ├── cost-only selection       M1
+      └── multi-objective selection M3
+```
 
-Следующий продуктовый milestone — **M3: Multi-objective Planning**: surplus/waste cost, стоимость дополнительных магазинов и объяснимый выбор между несколькими допустимыми планами.
+M3 добавляет поверх замороженного M1 hard-constraint ядра:
+
+- глобальный выбор между несколькими продавцами;
+- soft penalty за каждый дополнительный магазин после первого;
+- item-specific surplus penalty в KGS на одну базовую единицу (`g`, `ml`, `piece`);
+- surplus penalty применяется только к новому overbuy из выбранных покупок, а не к уже существующему домашнему запасу;
+- `ObjectiveBreakdown` с реальной стоимостью, soft penalties и итоговым score;
+- объяснение, почему выбранный план может быть дороже cost-only baseline;
+- отдельную M3 validation boundary;
+- общий candidate layer, используемый и M1, и M3.
+
+Принципиально важно:
+
+```text
+hard budget != objective score
+```
+
+Бюджет ограничивает только реальные деньги, которые пользователь заплатит. Soft penalties используются для сравнения допустимых планов и не притворяются реальными расходами.
+
+Также сохраняется сильная обратная совместимость:
+
+```text
+MultiObjectivePolicy.zero(currency)
+        ↓
+exactly the M1 plan
+```
+
+При нулевых penalties M3 выбирает те же offers, pack counts и leftovers, что и cost-only M1 baseline.
+
+Следующий milestone — **M4: Application Boundary**: тонкий внешний API вокруг уже доказанного planner core, без переноса доменной логики в HTTP слой.
 
 Подробнее:
 
@@ -228,7 +254,7 @@ M1 остаётся неизменным procurement-ядром, а M2 доба�
 
 ## Текущая исполнимая гарантия
 
-> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`; результат не зависит от ambient `decimal` precision. После этого M1 при фиксированных inventory, market и policy детерминированно строит валидный план закупки либо явно возвращает `infeasible`.
+> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`. M1 строит cost-only baseline, а M3 при фиксированной `MultiObjectivePolicy` детерминированно выбирает лучший budget-feasible план по реальной стоимости, surplus penalty и стоимости дополнительных магазинов. Все три слоя остаются независимыми от ambient `decimal` precision.
 
 Проверка из активированного виртуального окружения:
 
@@ -237,8 +263,9 @@ python -m pip install -e ".[dev]"
 python -m pytest
 python examples/m1_week_one.py
 python examples/m2_meal_demand.py
+python examples/m3_multi_objective.py
 ```
 
 Проект использует `src/` layout, поэтому прямой запуск examples предполагает, что package установлен в окружение. Editable install выше одновременно делает локальные изменения сразу доступными examples и повторяет способ установки в CI.
 
-M1/M2 намеренно не содержит авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.
+M1–M3 намеренно не содержат авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.

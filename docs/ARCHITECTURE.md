@@ -326,20 +326,52 @@ MarketSnapshot
 
 ### 3.10 PlanningPolicy
 
-Явно задаёт критерии выбора.
-
-Например:
+`PlanningPolicy` содержит hard constraints базовой задачи. В M1–M3 это прежде всего реальный бюджет:
 
 ```text
 PlanningPolicy
-- hard_budget
-- preferred_currency
-- store_visit_penalty
-- surplus_penalty
-- preference_penalties
+- budget: Money
 ```
 
-Первый planner может использовать только стоимость и hard budget.
+Базовая семантика:
+
+```text
+purchase_cost <= budget
+```
+
+Soft preferences намеренно не маскируются под hard budget.
+
+### 3.10.1 MultiObjectivePolicy
+
+M3 вводит отдельную soft-scoring policy:
+
+```text
+MultiObjectivePolicy
+- additional_store_penalty: Money
+- surplus_penalties[]: SurplusPenaltyRate
+
+SurplusPenaltyRate
+- item_id
+- cost_per_base_unit
+```
+
+`cost_per_base_unit` относится к нормализованной базовой единице requirement: `g` для массы, `ml` для объёма и `piece` для count. Например `0.05 KGS/g` означает виртуальную стоимость 20 KGS для 400 g избыточно купленного риса.
+
+Surplus objective учитывает только **over-purchase**, созданный текущим решением:
+
+```text
+purchased - net_required
+```
+
+Неиспользованный inventory, который уже находился дома до планирования, остаётся в `projected_leftovers`, но не штрафуется: текущий planner не способен изменить прошлую покупку.
+
+Эти значения — **не реальные расходы**, а soft objective terms. Поэтому:
+
+```text
+hard budget != objective score
+```
+
+План с purchase cost 160 KGS и objective score 660 KGS остаётся budget-feasible при hard budget 160 KGS, если дополнительные 500 KGS являются только store penalty.
 
 ---
 
@@ -366,8 +398,6 @@ PlanningProblem
 
 `ProcurementPlan` — результат planner.
 
-Минимальная будущая форма:
-
 ```text
 ProcurementPlan
 - status
@@ -376,10 +406,27 @@ ProcurementPlan
 - projected_leftovers[]
 - total_cost
 - budget_remaining
-- objective_breakdown
+- minimum_required_cost?
+- objective_breakdown?
 - warnings[]
 - explanation[]
 ```
+
+`total_cost` всегда означает реальные расходы. В M3 `minimum_required_cost` сохраняет стоимость M1 cost-only baseline, даже если multi-objective plan осознанно выбирает более дорогую корзину.
+
+`ObjectiveBreakdown` отдельно показывает:
+
+```text
+ObjectiveBreakdown
+- purchase_cost
+- surplus_penalty
+- additional_store_penalty
+- total_score
+- selected_sellers[]
+- additional_store_count
+```
+
+Поэтому consumer никогда не обязан угадывать, является ли число фактической ценой или виртуальной оценкой предпочтения.
 
 `status` как минимум различает:
 
@@ -444,92 +491,151 @@ Planner не имеет права превышать hard budget ради «л�
 
 FastAPI schema, SQLAlchemy model или JSON магазина не являются канонической доменной моделью.
 
+### I11. Soft objective не изменяет hard budget
+
+```text
+objective_score > budget
+```
+
+само по себе не делает план infeasible. Проверяется только реальный `purchase_cost`.
+
+### I12. M3 является conservative extension M1
+
+```text
+MultiObjectivePolicy.zero(currency)
+        => exact M1 plan
+```
+
+Нулевая policy должна сохранить offers, pack counts, real cost и projected leftovers M1, а не просто найти другой план той же цены.
+
+### I13. Objective accounting проверяем отдельно
+
+`ObjectiveBreakdown` не считается доверенным только потому, что его создал planner. `validate_multi_objective_plan()` независимо пересчитывает seller set, surplus penalties, store penalty и minimum M1 cost из исходного `PlanningProblem`.
+
 ---
 
 ## 5. Модули
 
-Предварительная структура:
+Актуальная логическая структура planning core после M3:
 
 ```text
-src/
-└── <package_name>/
-    ├── domain/
-    │   ├── money.py
-    │   ├── quantity.py
-    │   ├── items.py
-    │   ├── household.py
-    │   ├── inventory.py
-    │   ├── demand.py
-    │   ├── market.py
-    │   └── plan.py
-    │
-    ├── demand/
-    │   ├── explicit.py
-    │   ├── meals.py
-    │   └── recurring.py
-    │
-    ├── inventory/
-    │   └── reconcile.py
-    │
-    ├── catalog/
-    │   ├── matching.py
-    │   └── substitutions.py
-    │
-    ├── planning/
-    │   ├── problem.py
-    │   ├── compile.py
-    │   ├── baseline.py
-    │   ├── validate.py
-    │   └── explain.py
-    │
-    ├── learning/
-    │   └── consumption.py
-    │
-    └── adapters/
-        ├── api/
-        ├── persistence/
-        └── market/
+src/household_supply/
+├── domain/
+│   ├── money.py
+│   ├── quantity.py
+│   ├── items.py
+│   ├── inventory.py
+│   ├── demand.py
+│   ├── recipes.py
+│   ├── market.py
+│   ├── objectives.py
+│   └── plan.py
+│
+├── demand/
+│   ├── sources.py
+│   └── compile.py
+│
+└── planning/
+    ├── compile.py       # Demand + inventory -> net requirements
+    ├── candidates.py    # package-aware purchase candidates
+    ├── baseline.py      # M1 cost-only selection
+    ├── objective.py     # M3 score accounting
+    ├── multi_objective.py
+    ├── assemble.py      # common ProcurementPlan assembly
+    └── validate.py
 ```
 
-Python package name зафиксирован в M1: `household_supply`.
+Ключевая граница M3:
+
+```text
+requirements
+    ↓
+candidate generation
+    ├── baseline selection
+    └── multi-objective selection
+```
+
+Candidate generation не знает, какой objective потом выберет planner. Благодаря этому будущий CP-SAT/MIP engine может заменить механизм перебора, не меняя `Item`, `Offer`, `Demand`, `ProcurementPlan` или семантику objective policy.
 
 ---
 
 ## 6. Planner
 
-### Baseline Planner
+### M1 Baseline Planner
 
-Первый planner намеренно простой:
+M1 выбирает для каждого Item package-aware candidate по ключу:
 
 ```text
-single objective:
-    minimize purchase cost
-
-constraints:
-    requirements covered
-    hard budget respected
-    offers available
-    packages integer
-    quantities valid
+minimum purchase cost
+then minimum surplus
+then minimum pack count
+then deterministic offer/count tie-break
 ```
 
-Его задача — стать корректным baseline, а не сразу найти глобально лучшую бытовую стратегию.
-
-### Дальнейшее развитие objective
-
-Позже:
+Hard constraints:
 
 ```text
-minimize(
+requirements covered
+hard budget respected
+offers available
+packages integer
+quantities compatible
+```
+
+### Общий Candidate Layer
+
+M3 выносит перебор допустимых package combinations в `planning/candidates.py`. И M1, и M3 работают с одной семантикой `ItemCandidate`:
+
+```text
+ItemCandidate
+- purchases[]
+- purchased quantity
+- purchase cost
+- over-purchase surplus
+- seller set
+- pack count
+- deterministic count signature
+```
+
+Это предотвращает появление двух независимых трактовок упаковок.
+
+### M3 Multi-objective Planner
+
+M3 решает уже глобальную задачу по всем Items, потому что store penalty связывает независимые товарные решения:
+
+```text
+objective_score =
     purchase_cost
-    + α * surplus
-    + β * store_visits
-    + γ * preference_penalty
-    + δ * preparation_burden
-)
+    + Σ(item surplus × configured rate)
+    + max(unique_sellers - 1, 0) × additional_store_penalty
 ```
 
-После появления достаточно сложных combinatorial cases можно рассматривать CP-SAT/MIP. Оптимизационный движок не должен становиться частью доменной модели.
+При этом:
+
+```text
+purchase_cost <= hard budget
+```
+
+остаётся отдельным hard constraint.
+
+Planner сохраняет budget-relevant Pareto candidates внутри одного seller set и затем выполняет bounded global search. Текущие exhaustive limits являются осознанным baseline-механизмом, а не обещанием масштабируемости. При росте реального рынка именно этот механизм должен быть заменён CP-SAT/MIP solver-ом.
+
+### Explainability
+
+M3 не ограничивается финальным score. План хранит objective breakdown и сравнивает решение с M1 baseline. Например:
+
+```text
+cost-only baseline: 180 KGS
+M3 purchase cost:   210 KGS
+baseline M3 score:  300 KGS
+selected M3 score:  210 KGS
+
+reason:
+30 KGS дополнительной реальной стоимости
+устраняют surplus и вторую поездку
+```
+
+Это позволяет UI позднее объяснять trade-off без повторного запуска optimizer-а.
 
 ---
 

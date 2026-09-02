@@ -35,6 +35,7 @@ jobs:
         run: |
           python examples/m1_week_one.py
           python examples/m2_meal_demand.py
+          python examples/m3_multi_objective.py
 
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

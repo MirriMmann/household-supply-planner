@@ -1,50 +1,69 @@
 from household_supply.market.catalogs.globus_demo_staples import (
-    MILK_BINDING,
-    MILK_ITEM,
-    MILK_LISTING,
-    MILK_SKU,
     build_globus_demo_staples_catalog,
 )
 
 
-def test_milk_item() -> None:
-    assert MILK_ITEM.id == "milk"
-    assert MILK_ITEM.canonical_name == "Молоко"
-
-
-def test_milk_sku() -> None:
-    assert MILK_SKU.id == "globus_milk_umut_1l"
-    assert MILK_SKU.item == MILK_ITEM
-    assert MILK_SKU.package_quantity.amount == 1
-    assert MILK_SKU.package_quantity.unit == "l"
-    assert MILK_SKU.brand == "Умут и Ко"
-
-
-def test_milk_listing_identity() -> None:
-    assert MILK_LISTING.seller_id == "globus-online-demo"
-    assert (
-        MILK_LISTING.external_product_id
-        == "3b709086a89e4a1ab6c238ca5cf1a742000100010000"
-    )
-
-
-def test_milk_binding() -> None:
-    assert MILK_BINDING.sku_id == MILK_SKU.id
-    assert MILK_BINDING.listing_key.provider_id == "globus-online-demo"
-    assert MILK_BINDING.listing_key.seller_id == "globus-online-demo"
-    assert (
-        MILK_BINDING.listing_key.external_product_id
-        == "3b709086a89e4a1ab6c238ca5cf1a742000100010000"
-    )
-
-
-def test_build_catalog() -> None:
+def test_globus_demo_staples_catalog() -> None:
     catalog, listings = build_globus_demo_staples_catalog()
 
-    assert len(catalog.skus) == 1
-    assert len(catalog.bindings) == 1
-    assert len(listings) == 1
+    assert len(catalog.skus) >= 20
+    assert len(catalog.bindings) == len(catalog.skus)
+    assert len(listings) == len(catalog.skus)
 
-    assert catalog.skus[0] == MILK_SKU
-    assert catalog.bindings[0] == MILK_BINDING
-    assert listings[0] == MILK_LISTING
+
+def test_sku_ids_are_unique() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    sku_ids = [sku.id for sku in catalog.skus]
+
+    assert len(sku_ids) == len(set(sku_ids))
+
+
+def test_item_ids_are_unique() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    item_ids = [sku.item.id for sku in catalog.skus]
+
+    assert len(item_ids) == len(set(item_ids))
+
+
+def test_bindings_reference_known_skus() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    sku_ids = {sku.id for sku in catalog.skus}
+
+    assert all(
+        binding.sku_id in sku_ids
+        for binding in catalog.bindings
+    )
+
+
+def test_external_product_ids_are_unique() -> None:
+    _, listings = build_globus_demo_staples_catalog()
+
+    external_ids = [
+        listing.external_product_id
+        for listing in listings
+    ]
+
+    assert len(external_ids) == len(set(external_ids))
+
+
+def test_package_quantities_are_positive() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    assert all(
+        sku.package_quantity.amount > 0
+        for sku in catalog.skus
+    )
+
+
+def test_urls_are_globus_urls() -> None:
+    _, listings = build_globus_demo_staples_catalog()
+
+    assert all(
+        listing.url.startswith(
+            "https://globus-online.kg/"
+        )
+        for listing in listings
+    )

@@ -26,6 +26,9 @@ class PlanningProblem:
     market: MarketSnapshot
     policy: PlanningPolicy
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "demands", tuple(self.demands))
+
 
 class PlanStatus(StrEnum):
     FEASIBLE = "feasible"
@@ -60,6 +63,40 @@ class ProjectedLeftover:
 
 
 @dataclass(frozen=True, slots=True)
+class ObjectiveBreakdown:
+    purchase_cost: Money
+    surplus_penalty: Money
+    additional_store_penalty: Money
+    total_score: Money
+    selected_sellers: tuple[str, ...]
+    additional_store_count: int
+
+    def __post_init__(self) -> None:
+        currency = self.purchase_cost.currency
+        for value in (
+            self.surplus_penalty,
+            self.additional_store_penalty,
+            self.total_score,
+        ):
+            if value.currency != currency:
+                raise ValueError("objective breakdown currencies must match")
+        if self.additional_store_count < 0:
+            raise ValueError("additional_store_count must not be negative")
+        if tuple(sorted(set(self.selected_sellers))) != self.selected_sellers:
+            raise ValueError("selected_sellers must be unique and sorted")
+        expected_store_count = max(len(self.selected_sellers) - 1, 0)
+        if self.additional_store_count != expected_store_count:
+            raise ValueError("additional_store_count does not match selected_sellers")
+        expected_total = (
+            self.purchase_cost
+            + self.surplus_penalty
+            + self.additional_store_penalty
+        )
+        if self.total_score != expected_total:
+            raise ValueError("objective total_score does not match objective terms")
+
+
+@dataclass(frozen=True, slots=True)
 class ProcurementPlan:
     status: PlanStatus
     purchases: tuple[Purchase, ...]
@@ -71,3 +108,18 @@ class ProcurementPlan:
     infeasibility_reasons: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     explanation: tuple[str, ...] = ()
+    objective_breakdown: ObjectiveBreakdown | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "purchases", tuple(self.purchases))
+        object.__setattr__(
+            self, "requirement_coverage", tuple(self.requirement_coverage)
+        )
+        object.__setattr__(
+            self, "projected_leftovers", tuple(self.projected_leftovers)
+        )
+        object.__setattr__(
+            self, "infeasibility_reasons", tuple(self.infeasibility_reasons)
+        )
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "explanation", tuple(self.explanation))

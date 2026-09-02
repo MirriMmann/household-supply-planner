@@ -3,7 +3,9 @@ from .inventory import InventoryLot, InventorySnapshot
 from .items import Item, SKU
 from .market import MarketSnapshot, Offer
 from .money import CurrencyMismatchError, Money
+from .objectives import MultiObjectivePolicy, SurplusPenaltyRate
 from .plan import (
+    ObjectiveBreakdown,
     PlanStatus,
     PlanningPolicy,
     PlanningProblem,
@@ -24,7 +26,9 @@ __all__ = [
     "MarketSnapshot",
     "MealRequest",
     "Money",
+    "MultiObjectivePolicy",
     "Offer",
+    "ObjectiveBreakdown",
     "PlanStatus",
     "PlanningPolicy",
     "PlanningProblem",
@@ -36,4 +40,5 @@ __all__ = [
     "RecipeIngredient",
     "RequirementCoverage",
     "SKU",
+    "SurplusPenaltyRate",
 ]

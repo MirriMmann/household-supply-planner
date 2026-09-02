@@ -34,10 +34,11 @@ class MarketSnapshot:
     offers: tuple[Offer, ...]
 
     def __post_init__(self) -> None:
-        offer_ids = [offer.id for offer in self.offers]
+        normalized_offers = tuple(self.offers)
+        offer_ids = [offer.id for offer in normalized_offers]
         if len(offer_ids) != len(set(offer_ids)):
             raise ValueError("market snapshot contains duplicate offer ids")
-        for offer in self.offers:
+        for offer in normalized_offers:
             try:
                 is_future = offer.observed_at > self.captured_at
             except TypeError as exc:
@@ -48,3 +49,4 @@ class MarketSnapshot:
                 raise ValueError(
                     f"offer observation is later than market snapshot: {offer.id}"
                 )
+        object.__setattr__(self, "offers", normalized_offers)

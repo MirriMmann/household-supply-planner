@@ -41,6 +41,17 @@ def subtract_decimals_exact(left: Decimal, right: Decimal) -> Decimal:
     return add_decimals_exact(left, negated)
 
 
+
+def multiply_decimals_exact(left: Decimal, right: Decimal) -> Decimal:
+    """Multiply two finite Decimals without applying ambient context precision."""
+
+    left_coefficient, left_exponent = _coefficient(left)
+    right_coefficient, right_exponent = _coefficient(right)
+    return decimal_from_coefficient(
+        left_coefficient * right_coefficient,
+        left_exponent + right_exponent,
+    )
+
 def multiply_decimal_by_int_exact(value: Decimal, multiplier: int) -> Decimal:
     coefficient, exponent = _coefficient(value)
     return decimal_from_coefficient(coefficient * multiplier, exponent)

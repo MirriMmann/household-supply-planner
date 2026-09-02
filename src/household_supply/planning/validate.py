@@ -149,3 +149,41 @@ def validate_plan(problem: PlanningProblem, plan: ProcurementPlan) -> None:
         )
         if leftovers_by_item[item_id].quantity != expected_leftover:
             raise PlanValidationError(f"projected leftover mismatch: {item_id}")
+
+
+def validate_multi_objective_plan(
+    problem: PlanningProblem,
+    policy,
+    plan: ProcurementPlan,
+) -> None:
+    """Validate M3 objective accounting independently of candidate selection."""
+
+    from household_supply.domain import MultiObjectivePolicy
+    from .baseline import build_plan
+    from .objective import objective_breakdown_for_plan, validate_objective_policy_currency
+
+    if not isinstance(policy, MultiObjectivePolicy):
+        raise TypeError("policy must be MultiObjectivePolicy")
+
+    validate_objective_policy_currency(problem, policy)
+
+    if plan.status is not PlanStatus.FEASIBLE:
+        if plan.objective_breakdown is not None:
+            raise PlanValidationError("infeasible plan must not contain objective breakdown")
+        return
+
+    validate_plan(problem, plan)
+    if plan.objective_breakdown is None:
+        raise PlanValidationError("multi-objective feasible plan lacks objective breakdown")
+
+    expected = objective_breakdown_for_plan(problem, policy, plan)
+    if plan.objective_breakdown != expected:
+        raise PlanValidationError("objective breakdown does not match plan and policy")
+
+    baseline = build_plan(problem)
+    if baseline.status is not PlanStatus.FEASIBLE:
+        raise PlanValidationError("multi-objective plan is feasible while baseline is infeasible")
+    if plan.minimum_required_cost != baseline.total_cost:
+        raise PlanValidationError(
+            "multi-objective minimum_required_cost does not match cost-only baseline"
+        )

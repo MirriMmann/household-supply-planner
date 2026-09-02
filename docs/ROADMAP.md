@@ -159,30 +159,67 @@ M2 также фиксирует attributable `DemandContribution` и детер
 
 ## M3 — Multi-objective Planning
 
-Цель: сделать результат бытово разумнее, чем просто минимальная цена.
+**Статус: реализован.**
 
-### Добавить
+Цель: сделать результат бытово разумнее, чем просто минимальная цена, не меняя hard constraints M1.
 
-- projected surplus;
-- waste/surplus penalty;
-- store visit penalty;
-- несколько продавцов;
-- objective breakdown;
-- explainability.
-
-Пример:
+### Реализовано
 
 ```text
-Store A + Store B дешевле на 37 KGS,
-но политика оценивает дополнительную поездку в 100 KGS,
-поэтому выбран план только из Store A.
+Purchase Candidate Generation
+          ├── M1: minimize purchase cost
+          └── M3: minimize objective score
 ```
 
-### Важное требование
+M3 objective:
 
-Каждый новый objective сравнивается с M1 baseline на фиксированном corpus задач.
+```text
+objective_score =
+    purchase_cost
+    + surplus_penalty
+    + additional_store_penalty
+```
 
-Если более сложный solver не улучшает целевую метрику или ухудшает корректность, он не заменяет baseline.
+Где:
+
+- `purchase_cost` — реальные расходы пользователя;
+- `surplus_penalty` — soft cost за избыточно купленное количество по item-specific rate;
+- existing inventory не штрафуется как surplus: objective учитывает только новый overbuy текущего плана;
+- `additional_store_penalty` — soft cost за каждого продавца после первого.
+
+### Hard budget остаётся отдельным
+
+```text
+purchase_cost <= hard_budget
+```
+
+Objective score может быть выше budget: soft penalties не являются фактическими расходами и не уменьшают `budget_remaining`.
+
+### Добавлено
+
+- `MultiObjectivePolicy`;
+- `SurplusPenaltyRate`;
+- `ObjectiveBreakdown`;
+- общий deterministic candidate generation layer;
+- global cross-item seller optimization;
+- budget-aware Pareto pruning внутри одинакового seller set;
+- отдельный `validate_multi_objective_plan()`;
+- объяснение trade-off относительно M1 cost-only baseline.
+
+### Доказано
+
+- store penalty может оправданно выбрать один магазин вместо нескольких более дешёвых;
+- surplus penalty может выбрать более дорогую, но точнее подходящую упаковку;
+- hard budget никогда не нарушается ради soft objective;
+- один seller для нескольких Items считается одной поездкой;
+- inventory-only plan не получает store penalty;
+- market/demand ordering не меняет результат;
+- ambient Decimal precision не меняет M3;
+- нулевая M3 policy буквально воспроизводит M1 selection.
+
+### Definition of Done
+
+> Для фиксированных `PlanningProblem` и `MultiObjectivePolicy` M3 детерминированно выбирает budget-feasible procurement plan с минимальным objective score, сохраняет M1 hard constraints и предоставляет независимо проверяемый objective breakdown. При нулевых soft penalties результат совпадает с M1 baseline.
 
 ---
 

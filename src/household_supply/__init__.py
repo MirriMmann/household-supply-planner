@@ -9,7 +9,9 @@ from .domain import (
     MarketSnapshot,
     MealRequest,
     Money,
+    MultiObjectivePolicy,
     Offer,
+    ObjectiveBreakdown,
     PlanStatus,
     PlanningPolicy,
     PlanningProblem,
@@ -21,6 +23,7 @@ from .domain import (
     RecipeIngredient,
     RequirementCoverage,
     SKU,
+    SurplusPenaltyRate,
 )
 from .demand import (
     DemandCompilation,
@@ -31,7 +34,13 @@ from .demand import (
     MealDemandSource,
     compile_demand_sources,
 )
-from .planning import PlanValidationError, build_plan, validate_plan
+from .planning import (
+    PlanValidationError,
+    build_multi_objective_plan,
+    build_plan,
+    validate_multi_objective_plan,
+    validate_plan,
+)
 
 __all__ = [
     "CurrencyMismatchError",
@@ -48,7 +57,9 @@ __all__ = [
     "MealDemandSource",
     "MealRequest",
     "Money",
+    "MultiObjectivePolicy",
     "Offer",
+    "ObjectiveBreakdown",
     "PlanStatus",
     "PlanValidationError",
     "PlanningPolicy",
@@ -61,7 +72,10 @@ __all__ = [
     "RecipeIngredient",
     "RequirementCoverage",
     "SKU",
+    "SurplusPenaltyRate",
+    "build_multi_objective_plan",
     "build_plan",
     "compile_demand_sources",
+    "validate_multi_objective_plan",
     "validate_plan",
 ]

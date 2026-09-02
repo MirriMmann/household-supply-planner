@@ -93,3 +93,39 @@ def test_decimal_domain_values_reject_non_finite_inputs(value: str) -> None:
         Money(value, "KGS")
     with pytest.raises(ValueError, match="must be finite"):
         Quantity(value, "g")
+
+
+def test_quantity_addition_is_exact_beyond_decimal_context_precision() -> None:
+    a = Quantity("1", "g")
+    b = Quantity("0.3333333333333333333333333333", "g")
+    c = Quantity("0.3333333333333333333333333333", "g")
+
+    assert (a + b) + c == a + (b + c)
+    assert (a + b) + c == Quantity("1.6666666666666666666666666666", "g")
+
+
+def test_money_arithmetic_is_independent_of_ambient_decimal_context() -> None:
+    from decimal import localcontext
+
+    left = Money("123456789.123456789", "KGS")
+    right = Money("0.000000001", "KGS")
+
+    observed = []
+    for precision in (6, 12, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            observed.append(
+                (
+                    left + right,
+                    left - right,
+                    left * 3,
+                )
+            )
+
+    assert observed == [
+        (
+            Money("123456789.123456790", "KGS"),
+            Money("123456789.123456788", "KGS"),
+            Money("370370367.370370367", "KGS"),
+        )
+    ] * 4

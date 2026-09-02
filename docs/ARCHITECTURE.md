@@ -230,11 +230,59 @@ StockThresholdSource
 FutureEventSource
 ```
 
-В первом milestone достаточно `ExplicitNeedSource`.
+M2 реализует `ExplicitNeedSource` и `MealDemandSource`. Оба источника производят только demand contributions и не получают доступ к inventory, market, budget или planner state.
 
-Рецепты добавляются позднее через `MealDemandSource`, не изменяя planner.
+`DemandCompilation` хранит две поверхности:
+
+```text
+contributions[]  # DemandContribution: attributable source inputs
+demands[]        # нормализованный aggregate по Item
+```
+
+`DemandContribution` отдельно фиксирует `source_id`, `contribution_id`, Item и Quantity. Compiler проверяет, что contribution действительно принадлежит тому `DemandSource`, который её вернул, и запрещает повтор одного contribution ID внутри source. Поэтому provenance не сводится к произвольной строке внутри `Demand` и не приходится кодировать в арифметику planner-а.
+
+`compile_demand_sources()` также проверяет уникальность source IDs, совместимость единиц и непротиворечивую Item identity, после чего детерминированно сортирует нормализованный demand по `item.id`.
+
+Рецепты входят через `MealDemandSource`, не изменяя planner.
 
 ---
+
+
+### 3.6.1 Recipe / MealRequest
+
+`Recipe` описывает количество ингредиентов для базового числа порций:
+
+```text
+Recipe
+- id
+- name
+- servings
+- ingredients[]
+
+RecipeIngredient
+- item
+- quantity
+```
+
+`MealRequest` связывает рецепт с фактически нужным количеством порций. Входные значения хранятся как точные конечные `Decimal`, а масштабирование выполняется через точное рациональное отношение, не используя ambient `decimal.getcontext()`:
+
+```text
+exact ratio = requested_servings / recipe.servings
+scaled ingredient = ingredient.quantity * exact ratio
+canonical result = round upward to 12 decimal places in the base unit
+```
+
+Некоторые отношения, например `1 / 3`, не имеют конечного Decimal-представления. Для них M2 фиксирует каноническую resolution policy: 12 знаков после запятой в базовой единице (`g`, `ml`, `piece`) с округлением вверх. Это делает результат воспроизводимым и не занижает demand из-за округления.
+
+`float` для servings намеренно не принимается: компиляция demand не должна вносить двоичную погрешность до planner-а.
+
+```text
+Recipe != MealRequest
+MealRequest != Demand
+RecipeIngredient != SKU
+```
+
+Рецепт не знает ни о магазине, ни о цене, ни о домашних запасах.
 
 ### 3.7 HouseholdSnapshot
 

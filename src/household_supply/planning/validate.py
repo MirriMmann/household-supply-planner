@@ -3,6 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 from household_supply.domain import PlanStatus, PlanningProblem, ProcurementPlan, Quantity
+from household_supply.domain._decimal import (
+    add_decimals_exact,
+    multiply_decimal_by_int_exact,
+    subtract_decimals_exact,
+)
 
 from .compile import compile_requirements
 
@@ -63,10 +68,13 @@ def validate_plan(problem: PlanningProblem, plan: ProcurementPlan) -> None:
             raise PlanValidationError(
                 f"purchase cost does not match offer price and package count: {purchase.offer.id}"
             )
-        expected_cost += expected_purchase_cost.amount
+        expected_cost = add_decimals_exact(
+            expected_cost, expected_purchase_cost.amount
+        )
 
-        expected_quantity = (
-            purchase.offer.sku.package_quantity.as_base().base_amount * purchase.packs
+        expected_quantity = multiply_decimal_by_int_exact(
+            purchase.offer.sku.package_quantity.as_base().base_amount,
+            purchase.packs,
         )
         acquired = purchase.acquired_quantity.as_base()
         requirement = requirements_by_item[item_id]
@@ -74,8 +82,8 @@ def validate_plan(problem: PlanningProblem, plan: ProcurementPlan) -> None:
             raise PlanValidationError(f"purchase quantity has incompatible unit: {item_id}")
         if acquired.base_amount != expected_quantity:
             raise PlanValidationError("purchase quantity does not match package count")
-        purchased_by_item[item_id] = (
-            purchased_by_item.get(item_id, Decimal("0")) + expected_quantity
+        purchased_by_item[item_id] = add_decimals_exact(
+            purchased_by_item.get(item_id, Decimal("0")), expected_quantity
         )
 
     if expected_cost != plan.total_cost.amount:
@@ -113,7 +121,9 @@ def validate_plan(problem: PlanningProblem, plan: ProcurementPlan) -> None:
         if coverage.purchased != expected_purchased:
             raise PlanValidationError(f"coverage purchase mismatch: {item_id}")
 
-        supplied_amount = requirement.inventory_used.base_amount + purchased_amount
+        supplied_amount = add_decimals_exact(
+            requirement.inventory_used.base_amount, purchased_amount
+        )
         expected_covered = Quantity(
             min(supplied_amount, requirement.required.base_amount),
             requirement.required.base_unit,
@@ -123,11 +133,17 @@ def validate_plan(problem: PlanningProblem, plan: ProcurementPlan) -> None:
         if coverage.covered.base_amount < requirement.required.base_amount:
             raise PlanValidationError(f"requirement is under-covered: {item_id}")
 
-        expected_leftover_amount = (
-            requirement.inventory_available.base_amount
-            - requirement.inventory_used.base_amount
-            + max(Decimal("0"), supplied_amount - requirement.required.base_amount)
+        unused_inventory = subtract_decimals_exact(
+            requirement.inventory_available.base_amount,
+            requirement.inventory_used.base_amount,
         )
+        overbuy = max(
+            Decimal("0"),
+            subtract_decimals_exact(
+                supplied_amount, requirement.required.base_amount
+            ),
+        )
+        expected_leftover_amount = add_decimals_exact(unused_inventory, overbuy)
         expected_leftover = Quantity(
             expected_leftover_amount, requirement.required.base_unit
         )

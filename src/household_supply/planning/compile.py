@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
-
 from household_supply.domain import Demand, PlanningProblem, Quantity
+from household_supply.domain._decimal import subtract_decimals_exact
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,10 +27,7 @@ def _aggregate_demands(demands: tuple[Demand, ...]) -> dict[str, Quantity]:
                 f"incompatible demand units for item {demand.item.id}: "
                 f"{previous.unit} and {base.unit}"
             )
-        aggregated[demand.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
+        aggregated[demand.item.id] = previous + base
     return aggregated
 
 
@@ -48,10 +44,7 @@ def _aggregate_inventory(problem: PlanningProblem) -> dict[str, Quantity]:
                 f"incompatible inventory units for item {lot.item.id}: "
                 f"{previous.unit} and {base.unit}"
             )
-        aggregated[lot.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
+        aggregated[lot.item.id] = previous + base
     return aggregated
 
 
@@ -69,7 +62,7 @@ def compile_requirements(problem: PlanningProblem) -> tuple[CompiledRequirement,
             )
         available = available.as_base()
         used_amount = min(required.base_amount, available.base_amount)
-        net_amount = required.base_amount - used_amount
+        net_amount = subtract_decimals_exact(required.base_amount, used_amount)
         result.append(
             CompiledRequirement(
                 item_id=item_id,

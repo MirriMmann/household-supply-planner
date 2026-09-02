@@ -110,18 +110,19 @@ HTTP не является критерием готовности.
 
 ## M2 — Demand Compilation & Meals
 
-**Статус: следующий milestone.**
+**Статус: завершён.**
 
 Цель: отделить способ появления потребности от самого planner.
 
-### Добавить
+### Реализовано
 
 ```text
 DemandSource
-ExplicitNeedSource
+DemandCompilation
+ExplicitNeed / ExplicitNeedSource
 MealDemandSource
-Recipe
-RecipeIngredient
+Recipe / RecipeIngredient
+MealRequest
 ```
 
 Пайплайн:
@@ -136,13 +137,23 @@ existing M1 planner
 
 Planner из M1 не должен знать, что часть demand появилась из рецептов.
 
-### Проверить
+M2 также фиксирует attributable `DemandContribution` и детерминированную recipe-scaling policy: repeating Decimal ratios округляются вверх до 12 знаков в базовой единице, независимо от ambient `decimal` context.
 
-- пересчёт порций;
+### Доказано
+
+- точный пересчёт порций на `Decimal`;
 - объединение одинаковых Items из разных recipes;
-- один Item нужен нескольким DemandSource;
+- один Item может одновременно требоваться нескольким `DemandSource`;
+- conflicting Item identity и incompatible units отклоняются;
+- source IDs уникальны в одной compilation;
+- исходные contributions сохраняются отдельно от normalized demands;
 - existing inventory применяется после aggregation;
-- изменение recipes не требует изменения optimizer.
+- M1 `build_plan()` не изменён для поддержки recipes;
+- старый M1 regression suite остаётся green.
+
+### Definition of Done
+
+> При фиксированном наборе `DemandSource` система детерминированно получает нормализованный `Demand[]` с сохраняемыми source contributions, а этот результат без специальных meal-paths проходит через существующий M1 procurement planner.
 
 ---
 

@@ -200,64 +200,43 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M7 — Plan Lifecycle & Persistence Boundary реализован.**
+**M8 — Household State & Learning реализован.**
 
-M1–M6 доказали deterministic demand/planning, market evidence, live Globus acquisition и тонкий application boundary. M7 добавляет первый durable history layer без переноса planning semantics в storage:
-
-```text
-JSON / CLI / ASGI request
-        ↓
-ApplicationPlanRequest
-        ↓
-M6 PlanApplicationService
-        ↓
-ApplicationPlanResult
-        ↓
-PlanLifecycleService
-        ↓
-PlanRecord
-        ↓
-PlanRepository
-```
-
-`PlanRecord` — immutable historical snapshot. Он сохраняет canonical request, serialized procurement result и полную M4 market-evidence basis, на которой план был построен. Чтение старого плана **никогда не** делает новый запрос в Globus и не запускает planner повторно. Поэтому изменение текущей цены не переписывает историю решения.
-
-Persistence остаётся application adapter. В M7 есть:
-
-- `PlanId`;
-- `PlanRecord`;
-- `PlanRepository` protocol;
-- `InMemoryPlanRepository`;
-- local-first `FilePlanRepository`;
-- `PlanLifecycleService`;
-- отдельный `PlanLifecycleJsonApi`.
-
-Filesystem repository хранит по одному JSON record на `PlanId`, не перезаписывает существующую identity и проверяет SHA-256 digest при чтении. Digest используется для обнаружения случайной corruption, а не как цифровая подпись или механизм аутентичности.
-
-M6 compute-only API остаётся доступным и не меняет семантику. Для durable host M7 surface выглядит так:
+M1–M7 доказали deterministic planning, attributable market evidence, application/lifecycle boundaries и durable plan history. M8 впервые добавляет историю **конкретного household namespace** как набор явных фактов, а не скрытую память модели:
 
 ```text
-GET  /health
-POST /plans          -> 201 + persisted PlanRecord
-GET  /plans/{id}     -> saved historical record
-GET  /plans?limit=N  -> recent history summaries
+PurchaseEvent / InventoryCorrection / ConsumptionObservation
+        ↓
+HouseholdEventRepository
+        ↓
+HouseholdHistory
+        ├── deterministic HouseholdState projection
+        └── transparent ConsumptionEstimate
+                         ↓
+                 RecurringNeedSource
+                         ↓
+                M2 demand compilation
+                         ↓
+                 existing planner
 ```
 
-`feasible` и `infeasible` оба являются допустимыми historical results и могут сохраняться. Invalid application input по-прежнему даёт `422`, market acquisition failure — `502`, declared repository failure — `500 storage_error`. Неожиданные programming/runtime failures не маскируются.
+События immutable и append-only. `ProcurementPlan` сам по себе **не** создаёт `PurchaseEvent`: запланировать покупку и реально купить товар — разные факты. `InventoryCorrection` не редактирует прошлые события, а добавляет новое absolute observation. Историческая проекция учитывает не только effective time, но и `recorded_at`, поэтому поздно внесённая коррекция не меняет то, что система могла знать раньше.
 
-Минимальный request остаётся тем же, что в M6:
+M8 learning остаётся полностью воспроизводимым. `ConsumptionEstimate` выводится только из explicit non-overlapping `ConsumptionObservation` и сохраняет:
 
-```json
-{
-  "budget": {"amount": "3000", "currency": "KGS"},
-  "demands": [
-    {"item_id": "milk", "quantity": {"amount": "1500", "unit": "ml"}},
-    {"item_id": "oil", "quantity": {"amount": "500", "unit": "ml"}}
-  ]
-}
-```
+- weighted daily quantity;
+- sample count;
+- exact total consumed evidence;
+- exact observed microseconds;
+- observed duration;
+- min/max observed daily rate;
+- `uncertainty` как descriptive max-minus-min spread.
 
-Денежные и дробные quantity values в JSON рекомендуется передавать строками. JSON `float` намеренно отклоняется, чтобы transport не вносил binary rounding до domain layer.
+`uncertainty` не выдаётся за confidence interval. Exact evidence сохраняется отдельно от rounded display estimate, поэтому `RecurringNeedSource` считает horizon напрямую из исходного рационального basis и округляет вверх только финальный demand.
+
+Local-first event persistence реализована через `FileHouseholdEventRepository`: один integrity-checked JSON file на `HouseholdEventId`, no-overwrite identity и atomic hard-link publication. SHA-256 digest предназначен для corruption detection, а не для authentication.
+
+M8 intentionally fail-closed на неоднозначной истории: overlapping consumption windows, расход выше tracked inventory, conflicting Item identity и `InventoryCorrection` внутри consumption interval не превращаются в молчаливую догадку.
 
 Подробнее:
 
@@ -266,7 +245,7 @@ GET  /plans?limit=N  -> recent history summaries
 
 ## Текущая исполнимая гарантия
 
-> Типизированный application request может получить attributable market snapshot через M4/M5, построить self-validating M3 plan через M6 и сохранить immutable M7 historical record, который перечитывается без повторного market acquisition или recomputation.
+> Append-only household facts можно durability сохранить, детерминированно спроецировать в текущий inventory, вывести из explicit consumption observations прозрачную daily-rate estimate и превратить её в attributable recurring demand, который проходит через существующий M2/M3 planning core без скрытой model memory.
 
 Проверка из активированного виртуального окружения:
 
@@ -280,6 +259,7 @@ python examples/m4_market_acquisition.py
 python examples/m5_globus_provider.py
 python examples/m6_application_service.py
 python examples/m7_plan_persistence.py
+python examples/m8_household_learning.py
 ```
 
 Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
@@ -289,4 +269,4 @@ python examples/m5_globus_live.py
 python examples/m6_globus_live.py
 ```
 
-CI остаётся полностью offline. M7 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.
+CI остаётся полностью offline. M8 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.

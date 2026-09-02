@@ -397,7 +397,62 @@ Persistence намеренно не добавляется в M6: `POST /plans` 
 
 ---
 
-## M7 — Household State & Learning
+## M7 — Plan Lifecycle & Persistence Boundary
+
+**Статус: реализован.**
+
+Цель: сохранить результат M6 как исторический planning record без повторного обращения к рынку и без привязки application core к PostgreSQL/SQLite.
+
+```text
+ApplicationPlanRequest
+        ↓
+M6 PlanApplicationService
+        ↓
+ApplicationPlanResult
+        ↓
+PlanLifecycleService
+        ↓
+PlanRecord
+        ↓
+PlanRepository
+```
+
+### Реализовано
+
+- path-safe `PlanId`;
+- immutable canonical JSON snapshots;
+- `PlanRecord` с SHA-256 corruption digest;
+- `PlanRepository` protocol;
+- `InMemoryPlanRepository`;
+- local-first `FilePlanRepository`;
+- exclusive no-overwrite record identity;
+- complete saved M4 market evidence basis;
+- `PlanLifecycleService`;
+- отдельный `PlanLifecycleJsonApi`;
+- `POST /plans` → `201` persisted record;
+- `GET /plans/{id}` → exact saved historical record;
+- `GET /plans?limit=N` → bounded recent-history summary;
+- ASGI query-string forwarding без framework dependency.
+
+История не является командой на recomputation:
+
+```text
+GET saved plan
+    != fetch current Globus
+    != rerun planner
+```
+
+Если цена магазина изменилась после создания record, старый record продолжает содержать старый request, старый result и exact market evidence, на котором он был построен.
+
+Filesystem adapter хранит dedicated JSON record per `PlanId`, никогда не перезаписывает существующую identity и публикует полностью записанный файл через same-directory hard-link. Digest предназначен для detection случайной corruption, а не как cryptographic signature доверенного автора.
+
+### Definition of Done
+
+> Completed M6 result можно сохранить, перечитать и перечислить как immutable historical snapshot; чтение истории не запускает market providers или planner, изменение текущего рынка не меняет старый record, а persistence остаётся заменяемым application adapter без database dependency.
+
+---
+
+## M8 — Household State & Learning
 
 Цель: система начинает учитывать историю конкретного дома.
 
@@ -430,7 +485,7 @@ Recurring demand создаётся из оценок через отдельн�
 
 ---
 
-## M8 — Natural Language Interface
+## M9 — Natural Language Interface
 
 Только здесь появляется AI-интерпретация пользовательских запросов.
 

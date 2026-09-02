@@ -200,47 +200,52 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M6 — Application Service + Minimal JSON/CLI/ASGI Boundary реализован.**
+**M7 — Plan Lifecycle & Persistence Boundary реализован.**
 
-M1–M5 доказали demand, optimization, market evidence и первый live retailer adapter. M6 впервые собирает эти слои в одну тонкую прикладную операцию:
+M1–M6 доказали deterministic demand/planning, market evidence, live Globus acquisition и тонкий application boundary. M7 добавляет первый durable history layer без переноса planning semantics в storage:
 
 ```text
 JSON / CLI / ASGI request
         ↓
 ApplicationPlanRequest
         ↓
-catalog preflight
-        ↓
-PlanApplicationService
-        ↓
-MarketProvider[]
-        ↓
-M4 MarketCompilation
-        ↓
-PlanningProblem
-        ↓
-M3 planner
+M6 PlanApplicationService
         ↓
 ApplicationPlanResult
         ↓
-JSON response
+PlanLifecycleService
+        ↓
+PlanRecord
+        ↓
+PlanRepository
 ```
 
-Application boundary намеренно не содержит planner logic. `PlanApplicationService` только валидирует request против exact configured catalog, получает attributable market evidence, собирает уже существующий `PlanningProblem` и вызывает M3. Неизвестный `item_id`, несовместимая единица или бессмысленная objective policy отклоняются **до market acquisition**, поэтому ошибочный пользовательский ввод не запускает внешнюю сеть.
+`PlanRecord` — immutable historical snapshot. Он сохраняет canonical request, serialized procurement result и полную M4 market-evidence basis, на которой план был построен. Чтение старого плана **никогда не** делает новый запрос в Globus и не запускает planner повторно. Поэтому изменение текущей цены не переписывает историю решения.
 
-Freshness также принадлежит application host: service использует timezone-aware injected clock после acquisition, поэтому M4 `max_observation_age` измеряется относительно фактического application capture time, а не времени, которое принёс сам provider.
+Persistence остаётся application adapter. В M7 есть:
 
-M6 добавляет три тонких adapter surface:
+- `PlanId`;
+- `PlanRecord`;
+- `PlanRepository` protocol;
+- `InMemoryPlanRepository`;
+- local-first `FilePlanRepository`;
+- `PlanLifecycleService`;
+- отдельный `PlanLifecycleJsonApi`.
 
-- `PlanJsonApi` — transport-neutral `POST /plans` / `GET /health`;
-- `run_plan_cli()` — injected CLI adapter, который читает тот же JSON contract из файла/stdin;
-- `PlanAsgiApp` — dependency-free ASGI wrapper с bounded JSON body.
+Filesystem repository хранит по одному JSON record на `PlanId`, не перезаписывает существующую identity и проверяет SHA-256 digest при чтении. Digest используется для обнаружения случайной corruption, а не как цифровая подпись или механизм аутентичности.
 
-ASGI/CLI получают готовый `PlanApplicationService` от embedding host. Поэтому core не захардкоживает Globus, FastAPI, конкретный каталог или способ запуска сервера. Будущий M5.1 catalog pack можно подключить к тому же service без изменения HTTP/CLI semantics.
+M6 compute-only API остаётся доступным и не меняет семантику. Для durable host M7 surface выглядит так:
 
-`infeasible` остаётся нормальным результатом планирования (`200` с `status=infeasible`), а не transport error. Ошибка input contract даёт `422`, ошибка market acquisition — `502`. Неожиданные programming/runtime failures не маскируются под пользовательскую ошибку.
+```text
+GET  /health
+POST /plans          -> 201 + persisted PlanRecord
+GET  /plans/{id}     -> saved historical record
+GET  /plans?limit=N  -> recent history summaries
+```
 
-Минимальный JSON request:
+`feasible` и `infeasible` оба являются допустимыми historical results и могут сохраняться. Invalid application input по-прежнему даёт `422`, market acquisition failure — `502`, declared repository failure — `500 storage_error`. Неожиданные programming/runtime failures не маскируются.
+
+Минимальный request остаётся тем же, что в M6:
 
 ```json
 {
@@ -248,13 +253,6 @@ ASGI/CLI получают готовый `PlanApplicationService` от embedding
   "demands": [
     {"item_id": "milk", "quantity": {"amount": "1500", "unit": "ml"}},
     {"item_id": "oil", "quantity": {"amount": "500", "unit": "ml"}}
-  ],
-  "inventory": [
-    {
-      "lot_id": "opened-milk",
-      "item_id": "milk",
-      "quantity": {"amount": "250", "unit": "ml"}
-    }
   ]
 }
 ```
@@ -268,7 +266,7 @@ ASGI/CLI получают готовый `PlanApplicationService` от embedding
 
 ## Текущая исполнимая гарантия
 
-> Типизированный application request с budget, explicit demand, optional inventory и soft objective policy проходит catalog preflight, получает текущий market snapshot через M4/M5 и возвращает self-validating procurement result через неизменённый M3 planner. JSON, CLI и ASGI adapters не содержат скрытой planning semantics.
+> Типизированный application request может получить attributable market snapshot через M4/M5, построить self-validating M3 plan через M6 и сохранить immutable M7 historical record, который перечитывается без повторного market acquisition или recomputation.
 
 Проверка из активированного виртуального окружения:
 
@@ -281,6 +279,7 @@ python examples/m3_multi_objective.py
 python examples/m4_market_acquisition.py
 python examples/m5_globus_provider.py
 python examples/m6_application_service.py
+python examples/m7_plan_persistence.py
 ```
 
 Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
@@ -290,4 +289,4 @@ python examples/m5_globus_live.py
 python examples/m6_globus_live.py
 ```
 
-CI остаётся полностью offline: retailer transport заменяется deterministic fixture implementation. M6 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.
+CI остаётся полностью offline. M7 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.

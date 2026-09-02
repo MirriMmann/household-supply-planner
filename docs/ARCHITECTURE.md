@@ -780,6 +780,20 @@ M5 не преобразует `сом/кг` в фиктивную упаков�
 
 ---
 
+### I24. Historical plan не recompute-ится при чтении
+
+Сохранённый `PlanRecord` является snapshot. Retrieval не запускает market provider и planner.
+
+### I25. Persisted PlanId не перезаписывается
+
+Repository обязан fail closed при попытке сохранить уже существующую identity. Новая цена или новый run создают новый record.
+
+### I26. Persistence failure не является market failure
+
+Storage exception не маскируется как `502 market_unavailable`, а programming/runtime exception не маскируется как declared storage condition.
+
+---
+
 ## 5. Модули
 
 Актуальная логическая структура после M6:
@@ -1066,25 +1080,75 @@ LLM confidence != market evidence
 
 ---
 
-## 9. Persistence boundary
+## 9. Plan lifecycle & persistence boundary (M7)
 
-База данных появится тогда, когда появятся состояния, которые действительно нужно сохранять.
-
-Кандидаты:
+M7 добавляет persistence только для уже возникшего реального требования: после M6 пользовательский plan имеет смысл открыть позднее и увидеть **тот же самый** market basis и результат.
 
 ```text
-Items / SKUs
-Offers / observations
-Inventory events
-Purchase events
-Consumption observations
-Plans
-Household preferences
+ApplicationPlanResult
+        ↓
+PlanLifecycleService
+        ↓
+PlanRecord
+        ↓
+PlanRepository
+        ├── InMemoryPlanRepository
+        └── FilePlanRepository
 ```
 
-До этого fixture-файлы достаточны.
+`PlanRecord` не является mutable session и не является инструкцией «вычислить снова». Он содержит immutable canonical JSON snapshots:
 
-PostgreSQL и SQLAlchemy не являются архитектурным требованием M1.
+```text
+plan_id
+created_at
+request
+result
+market_evidence
+digest
+```
+
+Market evidence сохраняет exact M4 derivation surface, необходимую для исторической инспекции:
+
+```text
+CatalogSnapshot projection
+MarketAcquisitionBatch[]
+MarketCompilationPolicy
+observation dispositions / resolutions
+planner-facing offers + provenance
+```
+
+Поэтому:
+
+```text
+GET /plans/{id}
+    != current market acquisition
+    != planner recomputation
+    != silent migration to today's price
+```
+
+`PlanRepository` — application protocol. Domain/planning layers не импортируют filesystem или database adapters. M7 намеренно начинает с local-first JSON filesystem repository, а не с PostgreSQL.
+
+Filesystem adapter:
+
+- использует path-safe `PlanId`;
+- публикует полностью записанный same-directory temporary file через hard-link;
+- никогда не заменяет существующий `PlanId`;
+- имеет bounded record size;
+- запрещает record symlink;
+- проверяет strict record schema;
+- сверяет SHA-256 corruption digest при чтении.
+
+Digest обнаруживает случайную/несогласованную модификацию файла, но **не является цифровой подписью** и не доказывает автора record.
+
+Отдельный `PlanLifecycleJsonApi` добавляет durable HTTP semantics:
+
+```text
+POST /plans          -> 201 record created
+GET  /plans/{id}     -> 200 exact saved record / 404
+GET  /plans?limit=N  -> 200 bounded recent summaries
+```
+
+M6 `PlanJsonApi` остаётся compute-only surface с прежним `200` planning result. Host явно выбирает, нужна ему persistence или нет.
 
 ---
 

@@ -12,54 +12,55 @@ from household_supply.market.providers.globus_online import (
 )
 
 
-MILK_ITEM = Item(
-    id="milk",
-    canonical_name="Молоко",
-    category="food",
-    aliases=(
-        "молоко",
-        "milk",
-    ),
-)
+_PROVIDER_ID = "globus-online-demo"
 
 
-MILK_SKU = SKU(
-    id="globus_milk_umut_1l",
-    item=MILK_ITEM,
-    name="Молоко Умут и К 3,2% 1000г т/п",
-    package_quantity=Quantity("1", "l"),
-    brand="Умут и Ко",
-)
-
-
-MILK_LISTING = GlobusOnlineListing(
-    url=(
-        "https://globus-online.kg/ru-kg/good/"
-        "3b709086a89e4a1ab6c238ca5cf1a742000100010000"
+def _make_product(
+    *,
+    item_id: str,
+    item_name: str,
+    category: str,
+    sku_id: str,
+    sku_name: str,
+    package_amount: str,
+    package_unit: str,
+    brand: str,
+    url: str,
+) -> tuple[Item, SKU, GlobusOnlineListing, CatalogBinding]:
+    item = Item(
+        id=item_id,
+        canonical_name=item_name,
+        category=category,
     )
-)
 
+    sku = SKU(
+        id=sku_id,
+        item=item,
+        name=sku_name,
+        package_quantity=Quantity(
+            package_amount,
+            package_unit,
+        ),
+        brand=brand,
+    )
 
-MILK_BINDING = CatalogBinding(
-    listing_key=ExternalListingKey(
-        provider_id=MILK_LISTING.seller_id,
-        seller_id=MILK_LISTING.seller_id,
-        external_product_id=MILK_LISTING.external_product_id,
-    ),
-    sku_id=MILK_SKU.id,
-    source=MILK_LISTING.url,
-)
+    listing = GlobusOnlineListing(url=url)
+
+    binding = CatalogBinding(
+        listing_key=ExternalListingKey(
+            provider_id=_PROVIDER_ID,
+            seller_id=listing.seller_id,
+            external_product_id=listing.external_product_id,
+        ),
+        sku_id=sku.id,
+        source=listing.url,
+    )
+
+    return item, sku, listing, binding
 
 
 def build_globus_demo_staples_catalog() -> tuple[
     CatalogSnapshot,
     tuple[GlobusOnlineListing, ...],
 ]:
-    catalog = CatalogSnapshot(
-        skus=(MILK_SKU,),
-        bindings=(MILK_BINDING,),
-    )
-
-    listings = (MILK_LISTING,)
-
-    return catalog, listings
+    ... 

@@ -792,11 +792,37 @@ Repository обязан fail closed при попытке сохранить у�
 
 Storage exception не маскируется как `502 market_unavailable`, а programming/runtime exception не маскируется как declared storage condition.
 
+### I27. Household fact != derived state
+
+`PurchaseEvent`, `InventoryCorrection` и `ConsumptionObservation` являются source facts. `HouseholdState`, `ConsumptionEstimate` и recurring demand всегда выводятся из них и могут быть пересчитаны.
+
+```text
+ProcurementPlan != PurchaseEvent
+estimate != observation
+projection != mutable source of truth
+```
+
+### I28. Historical projection ограничена временем знания
+
+Событие участвует в `HouseholdState(as_of=T)` только если и его effective time, и `recorded_at` не позже `T`. Late-recorded fact не переписывает то, что система могла знать до его записи.
+
+### I29. Неоднозначный household replay fail closed
+
+Перекрывающиеся `ConsumptionObservation` одного Item запрещены. `InventoryCorrection`, находящаяся строго внутри consumption interval, также запрещает projection: без более точных данных невозможно определить, какая часть расхода произошла до absolute count и какая после.
+
+### I30. Rounded estimate не владеет recurring arithmetic
+
+Display daily-rate округляется детерминированно, но `ConsumptionEstimate` сохраняет exact total consumed и exact observed duration. `RecurringNeedSource` вычисляет horizon из этой evidence basis и округляет вверх только финальный demand.
+
+### I31. Household event identity append-only
+
+`HouseholdEventId` не перезаписывается. File repository публикует complete JSON record через no-overwrite operation и проверяет corruption digest при чтении. Digest не является подписью или authentication mechanism.
+
 ---
 
 ## 5. Модули
 
-Актуальная логическая структура после M6:
+Актуальная логическая структура после M8:
 
 ```text
 src/household_supply/
@@ -833,10 +859,22 @@ src/household_supply/
 │   ├── assemble.py      # common ProcurementPlan assembly
 │   └── validate.py
 │
+├── household/
+│   ├── events.py        # M8 source facts + effective/recorded time
+│   ├── history.py       # immutable fact collection
+│   ├── projection.py    # facts -> HouseholdState / InventorySnapshot
+│   ├── learning.py      # exact evidence -> transparent estimate
+│   ├── recurring.py     # estimate -> M2 DemandSource
+│   ├── persistence.py   # append-only event repository adapters
+│   └── service.py       # thin household orchestration boundary
+│
 └── application/
     ├── models.py        # typed request/result + catalog preflight
     ├── service.py       # M6 orchestration boundary
-    ├── json_api.py      # strict JSON contract / response serialization
+    ├── json_api.py      # strict compute-only JSON contract
+    ├── lifecycle.py     # M7 durable plan lifecycle
+    ├── lifecycle_api.py # M7 history HTTP semantics
+    ├── persistence.py   # M7 PlanRepository adapters
     ├── cli.py           # injected CLI adapter
     └── asgi.py          # dependency-free bounded HTTP adapter
 ```
@@ -1152,42 +1190,141 @@ M6 `PlanJsonApi` остаётся compute-only surface с прежним `200` p
 
 ---
 
-## 10. Learning boundary
+## 10. Household state & learning boundary (M8)
 
-Фраза:
-
-> «Молоко обычно заканчивается раз в пять дней»
-
-не должна храниться как единственная истина системы.
-
-Предпочтительная модель:
+M8 хранит не «то, что модель запомнила», а explicit household facts. Repository instance является namespace одного household profile; multi-household account identity пока намеренно не вводится.
 
 ```text
 PurchaseEvent
-InventoryObservation
+InventoryCorrection
 ConsumptionObservation
         ↓
-ConsumptionEstimator
+HouseholdEventRepository
         ↓
-ConsumptionEstimate
+HouseholdHistory
+        ├── project_household_state()
+        │          ↓
+        │    HouseholdState
+        │          ↓
+        │    InventorySnapshot
+        │
+        └── estimate_consumption()
+                   ↓
+           ConsumptionEstimate
+                   ↓
+           RecurringNeedSource
+                   ↓
+           M2 demand compiler
 ```
 
-`ConsumptionEstimate` содержит как минимум:
+### Source facts
+
+`PurchaseEvent` означает подтверждённую фактическую покупку. Planner selection не превращается в purchase автоматически:
 
 ```text
-estimated_rate
-sample_count
-uncertainty/confidence
-basis_window
+planned purchase != completed purchase
 ```
 
-Алгоритм оценки можно менять без потери исходной истории.
+`InventoryCorrection` — абсолютный observed on-hand count. Она не меняет предыдущие event files и не стирает provenance.
+
+`ConsumptionObservation` описывает положительное consumed quantity на `[period_start, period_end]`. Для одного Item intervals не могут перекрываться: иначе одна consumption evidence могла бы попасть в state/learning дважды.
+
+У events есть `recorded_at`. Поэтому projection прошлого учитывает knowledge boundary:
+
+```text
+effective_at <= as_of
+AND
+recorded_at <= as_of
+```
+
+### Inventory projection
+
+Replay выполняется детерминированно в effective-time order:
+
+```text
+purchase    -> add
+consumption -> subtract
+correction  -> set absolute quantity
+```
+
+На одинаковом timestamp correction применяется последней как absolute count. Две corrections одного Item на одном timestamp отклоняются как ambiguous. Consumption, превышающий tracked balance, также отклоняется вместо implicit negative inventory.
+
+Если correction лежит строго внутри aggregate consumption interval, projection fail closed. Absolute count внутри интервала уничтожает информацию о split consumption; угадывать его M8 не пытается.
+
+`HouseholdState.inventory_snapshot()` создаёт обычный domain `InventorySnapshot`, поэтому household state не требует второй inventory model внутри planner.
+
+### Transparent consumption estimate
+
+Estimator использует только non-overlapping `ConsumptionObservation`. Central rate — duration-weighted rate:
+
+```text
+weighted_daily_rate =
+    total_consumed × one_day / total_observed_duration
+```
+
+Вся ratio arithmetic выполняется exact rational/integer arithmetic независимо от ambient Decimal context. Display values округляются half-even до bounded precision.
+
+`ConsumptionEstimate` хранит:
+
+```text
+item
+daily_quantity              # descriptive rounded rate
+sample_count
+observed_days
+total_consumed              # exact evidence
+observed_microseconds        # exact evidence
+daily_min
+daily_max
+uncertainty = daily_max - daily_min
+```
+
+`uncertainty` — descriptive observed spread, **не** confidence interval. Будущий estimator может использовать seasonality/weekday/model-based inference, но raw events остаются source of truth.
+
+### Recurring demand
+
+`RecurringNeedSource` реализует существующий M2 `DemandSource` contract. Он не умножает rounded `daily_quantity`. Вместо этого horizon считается напрямую из exact evidence:
+
+```text
+expected horizon quantity =
+    total_consumed
+    × horizon_duration
+    / observed_duration
+```
+
+Только финальный demand округляется вверх до canonical precision, поэтому промежуточное display rounding не может занизить потребность.
+
+### Durable household events
+
+`HouseholdEventRepository` имеет in-memory и local-first filesystem adapters. File adapter:
+
+- хранит один JSON record на path-safe `HouseholdEventId`;
+- никогда не заменяет существующий ID;
+- использует same-directory temporary write + `fsync`;
+- публикует event через no-overwrite hard link;
+- ограничивает размер record;
+- запрещает record symlink;
+- проверяет strict JSON schema и SHA-256 corruption digest.
+
+Digest обнаруживает accidental/inconsistent modification, но не является trust/signature boundary.
+
+### Planner composition
+
+M8 не добавляет `HouseholdPlanner`. Это намеренно: стандартные outputs уже существуют.
+
+```text
+HouseholdState.inventory_snapshot() -> existing inventory input
+RecurringNeedSource                 -> existing M2 demand compiler
+                                      ↓
+                                existing M3 planner
+```
+
+Таким образом learning не получает право принимать procurement decisions.
 
 ---
 
 ## 11. Что намеренно не входит в domain/planning core
 
-Даже после M6 domain/planning core не включает:
+Даже после M8 domain/planning core не включает:
 
 - HTTP/ASGI transport semantics;
 - UI;

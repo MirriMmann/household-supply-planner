@@ -40,6 +40,7 @@ jobs:
           python examples/m5_globus_provider.py
           python examples/m6_application_service.py
           python examples/m7_plan_persistence.py
+          python examples/m8_household_learning.py
 
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

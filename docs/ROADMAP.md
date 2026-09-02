@@ -454,34 +454,65 @@ Filesystem adapter хранит dedicated JSON record per `PlanId`, никогд
 
 ## M8 — Household State & Learning
 
-Цель: система начинает учитывать историю конкретного дома.
+**Статус: реализован.**
 
-Сначала события:
+Цель: система начинает учитывать историю конкретного дома через явные replayable facts, а не через скрытое состояние модели.
 
 ```text
 PurchaseEvent
 InventoryCorrection
 ConsumptionObservation
+        ↓
+HouseholdEventRepository
+        ↓
+HouseholdHistory
+        ├── HouseholdState
+        └── ConsumptionEstimate
+                  ↓
+          RecurringNeedSource
+                  ↓
+          M2 demand compiler
 ```
 
-Затем производные оценки:
+### Реализовано
+
+- path-safe `HouseholdEventId`;
+- immutable `PurchaseEvent`;
+- absolute `InventoryCorrection`;
+- interval-based `ConsumptionObservation`;
+- separate effective/recorded time semantics;
+- `HouseholdHistory`;
+- deterministic inventory replay;
+- `HouseholdState.inventory_snapshot()`;
+- `ConsumptionEstimate`;
+- weighted daily-rate estimation from exact rational evidence;
+- sample count / observed duration / min-max spread;
+- exact total-consumed + observed-microseconds basis retained;
+- `RecurringNeedSource` compatible with existing M2 compiler;
+- `HouseholdEventRepository` protocol;
+- in-memory repository;
+- local-first file repository with no-overwrite publication and corruption digest;
+- `HouseholdLearningService`;
+- executable M8 offline vertical slice through the existing planner.
+
+### Important semantics
 
 ```text
-ConsumptionEstimate
+ProcurementPlan != PurchaseEvent
+correction != history rewrite
+estimate != source fact
+rounded display rate != recurring arithmetic basis
 ```
 
-Пример:
+A late-recorded fact does not appear in a historical projection before its `recorded_at`. Overlapping consumption intervals are rejected to prevent double counting. An absolute inventory correction strictly inside a consumption interval is also rejected because the split of consumption around that count is unknowable from the supplied evidence.
 
-```text
-milk:
-    estimated daily rate = ...
-    sample count = ...
-    uncertainty = ...
-```
+`ConsumptionEstimate.uncertainty` is the observed daily max-minus-min spread. It is descriptive evidence, not a statistical confidence interval. Better forecasting can later replace the estimator without deleting raw household events.
 
-Recurring demand создаётся из оценок через отдельный `RecurringNeedSource`.
+Recurring demand is derived directly from exact total consumption and exact observation duration, then rounded **upward only at the final demand boundary**. This prevents a rounded daily display rate from understating future demand.
 
-Никакой скрытой «памяти модели».
+### Definition of Done
+
+> Household events survive restart, replay to a deterministic current inventory, produce transparent consumption estimates and generate attributable recurring demand through the existing M2/M3 planning system; every derived value remains reproducible from explicit stored facts and ambiguous history fails closed.
 
 ---
 

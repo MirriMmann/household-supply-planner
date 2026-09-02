@@ -200,35 +200,66 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M5 — Real Market Provider Vertical Slice реализован.**
+**M6 — Application Service + Minimal JSON/CLI/ASGI Boundary реализован.**
 
-M1–M4 доказали demand, procurement optimization и admission внешнего market evidence. M5 впервые подключает этот контракт к реальному публичному retailer surface: **Globus Online demo catalog**.
+M1–M5 доказали demand, optimization, market evidence и первый live retailer adapter. M6 впервые собирает эти слои в одну тонкую прикладную операцию:
 
 ```text
-explicit Globus product URLs
+JSON / CLI / ASGI request
         ↓
-GlobusOnlineDemoProvider
+ApplicationPlanRequest
         ↓
-MarketAcquisitionBatch
+catalog preflight
         ↓
-M4 catalog resolution / compilation
+PlanApplicationService
         ↓
-MarketSnapshot
+MarketProvider[]
         ↓
-M1 / M3 planner
+M4 MarketCompilation
+        ↓
+PlanningProblem
+        ↓
+M3 planner
+        ↓
+ApplicationPlanResult
+        ↓
+JSON response
 ```
 
-Provider намеренно bounded: он не является crawler-ом, не ищет товары по строкам и не угадывает SKU. Caller явно перечисляет product pages, а их `external_product_id` затем связывается с каноническим SKU через существующий M4 `CatalogBinding`.
+Application boundary намеренно не содержит planner logic. `PlanApplicationService` только валидирует request против exact configured catalog, получает attributable market evidence, собирает уже существующий `PlanningProblem` и вызывает M3. Неизвестный `item_id`, несовместимая единица или бессмысленная objective policy отклоняются **до market acquisition**, поэтому ошибочный пользовательский ввод не запускает внешнюю сеть.
 
-Публичный Globus Online без адреса доставки помечает данные как **демо-каталог**, поэтому M5 фиксирует seller scope как `globus-online-demo` и требует явное evidence demo/addressless state. Эти данные нельзя выдавать за ассортимент конкретного магазина или адреса.
+Freshness также принадлежит application host: service использует timezone-aware injected clock после acquisition, поэтому M4 `max_observation_age` измеряется относительно фактического application capture time, а не времени, которое принёс сам provider.
 
-Price/availability evidence дополнительно ограничено product surface целевой карточки: текст из cart/recommendation/footer ниже структурной границы не может изменить цену или availability целевого товара. Скидочная current price принимается по явному контексту `вместо обычной цены`. Если raw DOM не сохраняет эту фразу в одном текстовом порядке, допускается второй строго проверяемый вариант: ровно две distinct KGS-цены + один явный discount percent, причём меньшая цена должна математически соответствовать этому проценту. Просто «взять меньшую цену» нельзя; несогласованные или иные неоднозначные цены fail-closed.
+M6 добавляет три тонких adapter surface:
 
-M5 также выявил реальное ограничение M4: sold-out listing может не публиковать цену. Поэтому `MarketObservation(price=None, available=False)` теперь допустим. Latest unpriced-unavailable observation блокирует fallback на старую цену, но не создаёт выдуманный `Offer`.
+- `PlanJsonApi` — transport-neutral `POST /plans` / `GET /health`;
+- `run_plan_cli()` — injected CLI adapter, который читает тот же JSON contract из файла/stdin;
+- `PlanAsgiApp` — dependency-free ASGI wrapper с bounded JSON body.
 
-На первом live slice поддерживаются только **packaged / piece-priced** товары. Страницы с `сом/кг` намеренно отклоняются: текущий procurement kernel оптимизирует целые упаковки и пока не моделирует произвольный весовой отпуск.
+ASGI/CLI получают готовый `PlanApplicationService` от embedding host. Поэтому core не захардкоживает Globus, FastAPI, конкретный каталог или способ запуска сервера. Будущий M5.1 catalog pack можно подключить к тому же service без изменения HTTP/CLI semantics.
 
-HTTP остаётся adapter mechanism: live provider использует stdlib transport с timeout, bounded response size, content-type checks и pre-fetch redirect validation. В тестах transport заменяется deterministic fixture implementation.
+`infeasible` остаётся нормальным результатом планирования (`200` с `status=infeasible`), а не transport error. Ошибка input contract даёт `422`, ошибка market acquisition — `502`. Неожиданные programming/runtime failures не маскируются под пользовательскую ошибку.
+
+Минимальный JSON request:
+
+```json
+{
+  "budget": {"amount": "3000", "currency": "KGS"},
+  "demands": [
+    {"item_id": "milk", "quantity": {"amount": "1500", "unit": "ml"}},
+    {"item_id": "oil", "quantity": {"amount": "500", "unit": "ml"}}
+  ],
+  "inventory": [
+    {
+      "lot_id": "opened-milk",
+      "item_id": "milk",
+      "quantity": {"amount": "250", "unit": "ml"}
+    }
+  ]
+}
+```
+
+Денежные и дробные quantity values в JSON рекомендуется передавать строками. JSON `float` намеренно отклоняется, чтобы transport не вносил binary rounding до domain layer.
 
 Подробнее:
 
@@ -237,7 +268,7 @@ HTTP остаётся adapter mechanism: live provider использует stdl
 
 ## Текущая исполнимая гарантия
 
-> Явно перечисленные packaged product pages публичного Globus demo catalog могут быть получены live, преобразованы в attributable `MarketObservation`, допущены существующим M4 catalog/evidence boundary и без retailer-specific planner logic использованы M1/M3. Provider не выдаёт demo scope за реальный адресный ассортимент, не выдумывает цену sold-out товара и не маскирует весовые товары под целые упаковки.
+> Типизированный application request с budget, explicit demand, optional inventory и soft objective policy проходит catalog preflight, получает текущий market snapshot через M4/M5 и возвращает self-validating procurement result через неизменённый M3 planner. JSON, CLI и ASGI adapters не содержат скрытой planning semantics.
 
 Проверка из активированного виртуального окружения:
 
@@ -249,14 +280,14 @@ python examples/m2_meal_demand.py
 python examples/m3_multi_objective.py
 python examples/m4_market_acquisition.py
 python examples/m5_globus_provider.py
+python examples/m6_application_service.py
 ```
 
-Опциональный **live smoke** (требует сети и обращается к публичному demo catalog):
+Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
 
 ```bash
 python examples/m5_globus_live.py
+python examples/m6_globus_live.py
 ```
 
-CI никогда не зависит от внешнего retailer: он запускает contract fixture M5, а live smoke остаётся отдельной проверкой адаптера.
-
-M1–M5 по-прежнему не требуют авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или LLM.
+CI остаётся полностью offline: retailer transport заменяется deterministic fixture implementation. M6 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.

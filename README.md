@@ -200,52 +200,46 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M3 — Multi-objective Planning реализован.**
+**M4 — Market Acquisition & Catalog Resolution реализован.**
 
-Ядро теперь разделяет три разные стадии принятия решения:
-
-```text
-Demand Sources
-      ↓
-Demand Compilation                 M2
-      ↓
-Net Requirements
-      ↓
-Purchase Candidate Generation
-      ├── cost-only selection       M1
-      └── multi-objective selection M3
-```
-
-M3 добавляет поверх замороженного M1 hard-constraint ядра:
-
-- глобальный выбор между несколькими продавцами;
-- soft penalty за каждый дополнительный магазин после первого;
-- item-specific surplus penalty в KGS на одну базовую единицу (`g`, `ml`, `piece`);
-- surplus penalty применяется только к новому overbuy из выбранных покупок, а не к уже существующему домашнему запасу;
-- `ObjectiveBreakdown` с реальной стоимостью, soft penalties и итоговым score;
-- объяснение, почему выбранный план может быть дороже cost-only baseline;
-- отдельную M3 validation boundary;
-- общий candidate layer, используемый и M1, и M3.
-
-Принципиально важно:
+До M4 planner получал уже готовый `MarketSnapshot`. Теперь появился строгий слой, который доказывает, как внешние наблюдения вообще получают право стать каноническими `Offer`:
 
 ```text
-hard budget != objective score
+MarketProvider
+      ↓
+MarketAcquisitionBatch
+      ↓
+MarketObservation[]
+      +
+CatalogSnapshot
+      ↓
+Catalog Resolution
+      ↓
+Market Compilation
+      ↓
+MarketSnapshot
+      ↓
+M1 / M3 planner
 ```
 
-Бюджет ограничивает только реальные деньги, которые пользователь заплатит. Soft penalties используются для сравнения допустимых планов и не притворяются реальными расходами.
-
-Также сохраняется сильная обратная совместимость:
+M4 вводит важное разделение:
 
 ```text
-MultiObjectivePolicy.zero(currency)
-        ↓
-exactly the M1 plan
+MarketObservation != Offer
+external listing != SKU
+product title != product identity
 ```
 
-При нулевых penalties M3 выбирает те же offers, pack counts и leftovers, что и cost-only M1 baseline.
+Внешняя запись допускается в planner только если её SKU identity доказана одним из двух способов:
 
-Следующий milestone — **M4: Application Boundary**: тонкий внешний API вокруг уже доказанного planner core, без переноса доменной логики в HTTP слой.
+- явный `CatalogBinding` для exact `(provider, seller, external_product_id)`;
+- точное совпадение `ProductIdentifier` (`GTIN`, `EAN`, `UPC` или другой явно названный namespace).
+
+Свободный текст вроде `"Milk 1L"`, похожее название бренда или одинаковый размер упаковки **не являются достаточным основанием для автоматического binding**. Если explicit binding, product identifier или package evidence противоречат друг другу, observation получает `conflict` и не попадает в `MarketSnapshot`.
+
+Для одной внешней listing identity M4 использует только последнее наблюдение. Старые записи остаются в `MarketCompilation` как `superseded`; stale observations можно исключать явной `MarketCompilationPolicy`; две конкурирующие latest-записи с одинаковым timestamp считаются конфликтом вместо произвольного выбора по порядку входа. Если именно latest evidence говорит `unavailable`, `unresolved` или `conflict`, compiler не откатывается к более старой удобной цене.
+
+Каждый admitted Offer сохраняет `OfferProvenance` с provider/listing identity, observation ID и source reference. Поэтому planner получает чистый snapshot, а acquisition layer сохраняет происхождение решения.
 
 Подробнее:
 
@@ -254,7 +248,7 @@ exactly the M1 plan
 
 ## Текущая исполнимая гарантия
 
-> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`. M1 строит cost-only baseline, а M3 при фиксированной `MultiObjectivePolicy` детерминированно выбирает лучший budget-feasible план по реальной стоимости, surplus penalty и стоимости дополнительных магазинов. Все три слоя остаются независимыми от ambient `decimal` precision.
+> При фиксированных external observations и `CatalogSnapshot` M4 детерминированно формирует attributable `MarketSnapshot`, не угадывает SKU identity по свободному тексту и не допускает unresolved/conflicting/stale evidence под видом рыночного факта. Полученный snapshot без специальных planner-paths используется замороженными M1/M3.
 
 Проверка из активированного виртуального окружения:
 
@@ -264,8 +258,9 @@ python -m pytest
 python examples/m1_week_one.py
 python examples/m2_meal_demand.py
 python examples/m3_multi_objective.py
+python examples/m4_market_acquisition.py
 ```
 
 Проект использует `src/` layout, поэтому прямой запуск examples предполагает, что package установлен в окружение. Editable install выше одновременно делает локальные изменения сразу доступными examples и повторяет способ установки в CI.
 
-M1–M3 намеренно не содержат авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.
+M1–M4 намеренно не содержат авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.

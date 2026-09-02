@@ -324,6 +324,143 @@ MarketSnapshot
 
 ---
 
+### 3.9.1 External market evidence
+
+M4 разделяет наблюдение внешнего источника и допущенный planner-ом Offer:
+
+```text
+MarketObservation != Offer
+```
+
+`MarketObservation` фиксирует материал, который сообщил конкретный provider:
+
+```text
+MarketObservation
+- id
+- provider_id
+- seller_id
+- external_product_id
+- price
+- observed_at
+- available
+- product_identifier?
+- package_quantity?
+- name / brand
+- source_ref
+```
+
+`name` и `brand` являются inspectable evidence, но не идентичностью. Core не делает fuzzy product matching по строкам.
+
+`MarketAcquisitionBatch` добавляет acquisition-time и provider attribution. Observation не может утверждать другого provider, чем batch, и `observed_at` не может находиться после `acquired_at`. Market timestamps обязаны быть timezone-aware.
+
+```text
+provider output != MarketSnapshot
+MarketObservation != accepted market fact
+```
+
+---
+
+### 3.9.2 CatalogSnapshot / Catalog Resolution
+
+`CatalogSnapshot` содержит канонические SKU и явные bindings внешних listing identities:
+
+```text
+CatalogSnapshot
+- skus[]
+- bindings[]
+
+ExternalListingKey
+- provider_id
+- seller_id
+- external_product_id
+
+CatalogBinding
+- listing_key
+- sku_id
+- source
+```
+
+`SKU` может содержать exact `ProductIdentifier`:
+
+```text
+ProductIdentifier
+- scheme   # gtin / ean13 / upc / ...
+- value
+```
+
+M4 разрешает automatic resolution только по двум основаниям:
+
+```text
+exact CatalogBinding
+OR
+exact ProductIdentifier match
+```
+
+Если оба основания присутствуют и подтверждают один SKU, resolution имеет статус `corroborated`. Если они указывают на разные SKU, это `conflict`.
+
+Если resolved SKU имеет известный identifier того же namespace, а observation сообщает другой identifier, binding не может замаскировать противоречие. Аналогично observed package quantity, если она передана, должна совпасть с canonical SKU package после unit normalization.
+
+Не используется правило вида:
+
+```text
+"похожее название" -> SKU
+"тот же бренд" -> SKU
+"тот же размер" -> SKU
+```
+
+Без exact identity evidence результат остаётся `unresolved`.
+
+---
+
+### 3.9.3 MarketCompilation
+
+`compile_market_snapshot()` превращает acquisition evidence в planner-facing snapshot:
+
+```text
+CatalogSnapshot
+      +
+MarketAcquisitionBatch[]
+      +
+MarketCompilationPolicy
+      ↓
+MarketCompilation
+      ├── dispositions[]
+      └── MarketSnapshot
+```
+
+Для одной `ExternalListingKey` используется только latest observation. Более старые события не удаляются из результата compilation, а получают disposition `superseded`.
+
+Если две записи являются одновременно latest и имеют одинаковый `observed_at`, compiler не выбирает одну по input order: обе получают `conflict`. Это защищает snapshot от скрытого last-write-wins при противоречивом evidence.
+
+Latest evidence является авторитетным по времени даже когда оно неудобно: `unavailable`, `unresolved` или `conflict` не приводят к fallback на более старую доступную/разрешённую запись.
+
+`MarketCompilationPolicy.max_observation_age` позволяет явно отбрасывать stale evidence. Batch, полученный позже `captured_at` требуемого snapshot, вообще не может использоваться для ретроспективного «знания задним числом».
+
+Допустимые dispositions:
+
+```text
+accepted
+superseded
+stale
+unresolved
+conflict
+```
+
+Только `accepted` observation создаёт `Offer`. Такой Offer получает `OfferProvenance`:
+
+```text
+OfferProvenance
+- observation_id
+- ExternalListingKey
+- source_ref
+```
+
+`MarketCompilation` дополнительно проверяет внутреннюю согласованность: каждый admitted Offer обязан соответствовать ровно одному accepted observation и exact resolved SKU/price/availability/timestamp attribution.
+
+Unavailable latest observation тоже является валидным market state: она допускается как `Offer(available=False)`, после чего planner уже механически не рассматривает её как покупаемый candidate.
+
+---
+
 ### 3.10 PlanningPolicy
 
 `PlanningPolicy` содержит hard constraints базовой задачи. В M1–M3 это прежде всего реальный бюджет:
@@ -523,28 +660,69 @@ external list mutation != policy mutation
 
 Это необходимо для гарантии воспроизводимости: фиксированные problem/policy должны оставаться фиксированными после создания объектов.
 
+### I15. External observation не является Offer
+
+```text
+MarketObservation != Offer
+```
+
+Provider может сообщить цену, но admission в `MarketSnapshot` требует catalog resolution и temporal checks.
+
+### I16. Свободный текст не устанавливает SKU identity
+
+```text
+name similarity != product identity
+brand similarity != product identity
+package similarity != product identity
+```
+
+Автоматическое разрешение требует exact binding или exact identifier.
+
+### I17. Противоречивое identity evidence не угадывается
+
+Binding/identifier/package conflict приводит к `conflict`, а не к выбору «наиболее вероятного» SKU.
+
+### I18. Market evidence имеет явное время знания
+
+`observed_at`, `acquired_at` и `captured_at` timezone-aware. Данные, acquired после snapshot time, не могут задним числом считаться доступными этому snapshot.
+
+### I19. Latest не означает silent last-write-wins
+
+Старые observations помечаются `superseded`; competing latest observations с одним timestamp являются конфликтом и не разрешаются порядком входного списка.
+
+### I20. Planner не знает механизм acquisition
+
+M1/M3 получают только canonical `MarketSnapshot`. API, scraper, JSON feed или retailer SDK не меняют planning semantics.
+
 ---
 
 ## 5. Модули
 
-Актуальная логическая структура planning core после M3:
+Актуальная логическая структура после M4:
 
 ```text
 src/household_supply/
 ├── domain/
 │   ├── money.py
 │   ├── quantity.py
-│   ├── items.py
+│   ├── items.py          # Item / SKU / ProductIdentifier
+│   ├── catalog.py        # CatalogSnapshot / explicit listing bindings
+│   ├── acquisition.py    # external MarketObservation / batches
 │   ├── inventory.py
 │   ├── demand.py
 │   ├── recipes.py
-│   ├── market.py
+│   ├── market.py         # canonical Offer / MarketSnapshot / provenance
 │   ├── objectives.py
 │   └── plan.py
 │
 ├── demand/
 │   ├── sources.py
 │   └── compile.py
+│
+├── market/
+│   ├── provider.py       # MarketProvider acquisition boundary
+│   ├── resolve.py        # exact catalog resolution
+│   └── compile.py        # observations -> MarketCompilation/Snapshot
 │
 └── planning/
     ├── compile.py       # Demand + inventory -> net requirements
@@ -555,6 +733,22 @@ src/household_supply/
     ├── assemble.py      # common ProcurementPlan assembly
     └── validate.py
 ```
+
+M4 сохраняет одностороннюю зависимость:
+
+```text
+external provider mechanism
+        ↓
+MarketObservation
+        ↓
+market resolution / compilation
+        ↓
+MarketSnapshot
+        ↓
+planning core
+```
+
+Planning core не импортирует acquisition provider implementations.
 
 Ключевая граница M3:
 

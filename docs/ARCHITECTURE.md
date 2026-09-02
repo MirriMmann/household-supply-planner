@@ -782,7 +782,7 @@ M5 не преобразует `сом/кг` в фиктивную упаков�
 
 ## 5. Модули
 
-Актуальная логическая структура после M5:
+Актуальная логическая структура после M6:
 
 ```text
 src/household_supply/
@@ -810,14 +810,21 @@ src/household_supply/
 │   └── providers/
 │       └── globus_online.py  # bounded M5 real-retailer adapter
 │
-└── planning/
-    ├── compile.py       # Demand + inventory -> net requirements
-    ├── candidates.py    # package-aware purchase candidates
-    ├── baseline.py      # M1 cost-only selection
-    ├── objective.py     # M3 score accounting
-    ├── multi_objective.py
-    ├── assemble.py      # common ProcurementPlan assembly
-    └── validate.py
+├── planning/
+│   ├── compile.py       # Demand + inventory -> net requirements
+│   ├── candidates.py    # package-aware purchase candidates
+│   ├── baseline.py      # M1 cost-only selection
+│   ├── objective.py     # M3 score accounting
+│   ├── multi_objective.py
+│   ├── assemble.py      # common ProcurementPlan assembly
+│   └── validate.py
+│
+└── application/
+    ├── models.py        # typed request/result + catalog preflight
+    ├── service.py       # M6 orchestration boundary
+    ├── json_api.py      # strict JSON contract / response serialization
+    ├── cli.py           # injected CLI adapter
+    └── asgi.py          # dependency-free bounded HTTP adapter
 ```
 
 M5 сохраняет одностороннюю зависимость:
@@ -930,7 +937,106 @@ reason:
 
 ---
 
-## 7. AI boundary
+
+## 7. Application boundary (M6)
+
+M6 добавляет отдельный application layer поверх уже замороженных domain/market/planning контрактов. Он не является новым planner-ом.
+
+```text
+transport payload
+      ↓
+ApplicationPlanRequest
+      ↓
+catalog preflight
+      ↓
+PlanApplicationService
+      ↓
+MarketProvider[]
+      ↓
+MarketCompilation
+      ↓
+PlanningProblem
+      ↓
+M3
+      ↓
+ApplicationPlanResult
+```
+
+### Request contract
+
+Первый M6 request surface намеренно узкий:
+
+```text
+ApplicationPlanRequest
+- demands[]: item_id + Quantity
+- inventory[]: lot_id + item_id + Quantity
+- budget: Money
+- objective_policy?: MultiObjectivePolicy
+```
+
+Explicit request не переносит `Item`, `SKU`, `Offer` или retailer identity через transport. `item_id` разрешается только против точного configured `CatalogSnapshot`.
+
+До любого market acquisition выполняется preflight:
+
+```text
+known item identity
+compatible quantity dimension
+unique demand item IDs
+unique inventory lot IDs
+objective currency == budget currency
+surplus objective references active demand items
+```
+
+Поэтому malformed/unknown input не создаёт внешний network effect.
+
+### Application clock
+
+Provider не определяет application present. После завершения acquisition service берёт timezone-aware host clock и передаёт его как `captured_at` в M4.
+
+```text
+provider acquired_at != application captured_at
+```
+
+Это необходимо для честной freshness policy: старый batch не может сделать собственное evidence «свежим», назначив snapshot time равным самому себе. Clock inject-able, поэтому tests остаются deterministic.
+
+### Result contract
+
+`ApplicationPlanResult` хранит exact request, `MarketCompilation`, derived `PlanningProblem`, effective objective policy и `ProcurementPlan`. Record повторно выводит ожидаемый problem из request + compilation и запускает M1/M3 validators.
+
+```text
+ApplicationPlanResult != mutable session
+ApplicationPlanResult != persistence record
+```
+
+### JSON / CLI / ASGI
+
+M6 transport adapters тонкие и используют один JSON schema.
+
+`PlanJsonApi`:
+
+```text
+GET  /health
+POST /plans
+```
+
+`run_plan_cli()` читает тот же payload из stdin/file и получает already-composed `PlanApplicationService` от host.
+
+`PlanAsgiApp` — dependency-free ASGI adapter. Он владеет только HTTP mechanism: method/path, JSON content type, UTF-8 decoding, body-size limit и response serialization. ASGI adapter не импортирует Globus provider и не вычисляет planner decisions.
+
+Transport status semantics:
+
+```text
+200 feasible/infeasible planning result
+400 malformed HTTP/JSON
+422 invalid application request
+502 market acquisition/compilation unavailable
+```
+
+`infeasible` не является HTTP error: это валидный ответ optimizer-а.
+
+---
+
+## 8. AI boundary
 
 AI не является источником канонической арифметики или фактом рынка.
 
@@ -960,7 +1066,7 @@ LLM confidence != market evidence
 
 ---
 
-## 8. Persistence boundary
+## 9. Persistence boundary
 
 База данных появится тогда, когда появятся состояния, которые действительно нужно сохранять.
 
@@ -982,7 +1088,7 @@ PostgreSQL и SQLAlchemy не являются архитектурным тре
 
 ---
 
-## 9. Learning boundary
+## 10. Learning boundary
 
 Фраза:
 
@@ -1015,11 +1121,11 @@ basis_window
 
 ---
 
-## 10. Что намеренно не входит в ядро
+## 11. Что намеренно не входит в domain/planning core
 
-На текущем этапе:
+Даже после M6 domain/planning core не включает:
 
-- HTTP;
+- HTTP/ASGI transport semantics;
 - UI;
 - авторизация;
 - аккаунты;

@@ -345,26 +345,55 @@ MarketObservation(price=None, available=False)
 
 ---
 
-## M6 — Application Boundary
+## M6 — Application Service + Minimal JSON/CLI/ASGI Boundary
 
-Цель: добавить тонкую прикладную поверхность вокруг уже доказанных M1–M5 контрактов.
+**Статус: реализован.**
 
-Возможный первый API:
+Цель: собрать M1–M5 в одну тонкую application operation без появления второго источника planning semantics.
 
 ```text
-POST /plans
-GET  /plans/{id}
+ApplicationPlanRequest
+        ↓
+catalog preflight (до сети)
+        ↓
+PlanApplicationService
+        ↓
+MarketProvider[] → M4 compilation
+        ↓
+M3 planner
+        ↓
+ApplicationPlanResult
 ```
 
-API должен только:
+### Реализовано
 
-- разобрать transport schema;
-- вызвать существующие demand/market/planning boundaries;
-- сериализовать результат.
+- typed `ApplicationPlanRequest`;
+- typed inventory input;
+- optional existing `MultiObjectivePolicy`;
+- exact catalog preflight до acquisition;
+- host-owned timezone-aware capture clock;
+- self-validating `ApplicationPlanResult`;
+- strict JSON parser/serializer;
+- `PlanJsonApi` (`POST /plans`, `GET /health`);
+- injected CLI adapter;
+- dependency-free bounded ASGI adapter.
 
-Он не должен переносить planner logic, catalog resolution или market evidence policy в HTTP handlers.
+### Transport semantics
 
-На этом этапе отдельно решается, нужна ли persistence layer для plans/catalog/observations и какая именно.
+```text
+feasible/infeasible -> 200
+malformed JSON/HTTP -> 400
+invalid application input -> 422
+market acquisition failure -> 502
+```
+
+Planner logic, catalog resolution и retailer parsing не копируются в transport adapters.
+
+### Definition of Done
+
+> Один explicit application request через offline fixture и opt-in live Globus composition получает attributable M4 market snapshot и self-validating M3 procurement plan; invalid catalog input прекращается до external acquisition, а JSON/CLI/ASGI остаются transport-only adapters.
+
+Persistence намеренно не добавляется в M6: `POST /plans` вычисляет result синхронно и не обещает `GET /plans/{id}` до появления настоящего требования хранить plan history.
 
 ---
 

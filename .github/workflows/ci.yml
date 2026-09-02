@@ -29,15 +29,16 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest
+        run: python -m pytest
 
-      - name: Run executable examples
+      - name: Run offline examples
         run: |
           python examples/m1_week_one.py
           python examples/m2_meal_demand.py
           python examples/m3_multi_objective.py
           python examples/m4_market_acquisition.py
           python examples/m5_globus_provider.py
+          python examples/m6_application_service.py
 
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

@@ -17,6 +17,7 @@ class Item:
             raise ValueError("item id must not be empty")
         if not self.canonical_name.strip():
             raise ValueError("item canonical_name must not be empty")
+        object.__setattr__(self, "aliases", tuple(self.aliases))
 
 
 @dataclass(frozen=True, slots=True)

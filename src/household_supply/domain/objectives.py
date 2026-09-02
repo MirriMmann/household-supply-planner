@@ -13,10 +13,12 @@ class SurplusPenaltyRate:
     cost_per_base_unit: Money
 
     def __post_init__(self) -> None:
-        if not self.item_id.strip():
+        normalized_item_id = self.item_id.strip()
+        if not normalized_item_id:
             raise ValueError("surplus penalty item_id must not be empty")
         if self.cost_per_base_unit.amount < 0:
             raise ValueError("surplus penalty rate must not be negative")
+        object.__setattr__(self, "item_id", normalized_item_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,12 +31,14 @@ class MultiObjectivePolicy:
     def __post_init__(self) -> None:
         if self.additional_store_penalty.amount < 0:
             raise ValueError("additional store penalty must not be negative")
-        item_ids = [penalty.item_id for penalty in self.surplus_penalties]
+        normalized_penalties = tuple(self.surplus_penalties)
+        item_ids = [penalty.item_id for penalty in normalized_penalties]
         if len(item_ids) != len(set(item_ids)):
             raise ValueError("multi-objective policy contains duplicate surplus item ids")
-        for penalty in self.surplus_penalties:
+        for penalty in normalized_penalties:
             if penalty.cost_per_base_unit.currency != self.additional_store_penalty.currency:
                 raise ValueError("all objective penalties must use the same currency")
+        object.__setattr__(self, "surplus_penalties", normalized_penalties)
 
     @classmethod
     def zero(cls, currency: str) -> MultiObjectivePolicy:

@@ -259,6 +259,54 @@ def test_multi_objective_policy_rejects_duplicate_surplus_rates() -> None:
         )
 
 
+def test_multi_objective_policy_freezes_mutable_penalty_input() -> None:
+    penalties = [SurplusPenaltyRate("rice", Money("0.1", "KGS"))]
+    policy = MultiObjectivePolicy(
+        additional_store_penalty=Money(0, "KGS"),
+        surplus_penalties=penalties,
+    )
+
+    penalties.append(SurplusPenaltyRate("milk", Money("0.2", "KGS")))
+
+    assert policy.surplus_penalties == (
+        SurplusPenaltyRate("rice", Money("0.1", "KGS")),
+    )
+
+
+def test_mutating_original_penalty_list_cannot_change_existing_policy_plan() -> None:
+    rice = Item("rice", "Rice")
+    problem = problem_for(
+        (Demand(rice, Quantity("600", "g")),),
+        (
+            make_offer("large", rice, "store-a", "1000", "g", "100"),
+            make_offer("exact", rice, "store-b", "600", "g", "110"),
+        ),
+    )
+    penalties = []
+    policy = MultiObjectivePolicy(
+        additional_store_penalty=Money(0, "KGS"),
+        surplus_penalties=penalties,
+    )
+
+    before = build_multi_objective_plan(problem, policy)
+    penalties.append(SurplusPenaltyRate("rice", Money("1", "KGS")))
+    after = build_multi_objective_plan(problem, policy)
+
+    assert purchase_ids(before) == ("large",)
+    assert after == before
+
+
+def test_surplus_penalty_item_id_is_canonicalized_before_duplicate_check() -> None:
+    with pytest.raises(ValueError, match="duplicate surplus"):
+        MultiObjectivePolicy(
+            additional_store_penalty=Money(0, "KGS"),
+            surplus_penalties=(
+                SurplusPenaltyRate(" rice ", Money("0.1", "KGS")),
+                SurplusPenaltyRate("rice", Money("0.2", "KGS")),
+            ),
+        )
+
+
 def test_planner_rejects_objective_currency_different_from_budget() -> None:
     rice = Item("rice", "Rice")
     problem = problem_for(

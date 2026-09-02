@@ -32,6 +32,8 @@ class InventorySnapshot:
     lots: tuple[InventoryLot, ...] = ()
 
     def __post_init__(self) -> None:
-        lot_ids = [lot.id for lot in self.lots]
+        normalized_lots = tuple(self.lots)
+        lot_ids = [lot.id for lot in normalized_lots]
         if len(lot_ids) != len(set(lot_ids)):
             raise ValueError("inventory snapshot contains duplicate lot ids")
+        object.__setattr__(self, "lots", normalized_lots)

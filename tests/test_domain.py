@@ -129,3 +129,69 @@ def test_money_arithmetic_is_independent_of_ambient_decimal_context() -> None:
             Money("370370367.370370367", "KGS"),
         )
     ] * 4
+
+
+def test_domain_collection_inputs_are_frozen_as_tuples() -> None:
+    from datetime import UTC, datetime
+
+    from household_supply import (
+        Demand,
+        InventoryLot,
+        InventorySnapshot,
+        Item,
+        MarketSnapshot,
+        Offer,
+        PlanningPolicy,
+        PlanningProblem,
+        ProcurementPlan,
+        PlanStatus,
+        Quantity,
+        SKU,
+    )
+
+    now = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+    rice = Item("rice", "Rice", aliases=["grain"])
+    sku = SKU("rice-1kg", rice, "Rice 1kg", Quantity(1, "kg"))
+    offer = Offer("offer-rice", sku, "store-a", Money(100, "KGS"), now, "fixture")
+    lot = InventoryLot("lot-rice", rice, Quantity(100, "g"))
+
+    aliases = ["grain"]
+    alias_item = Item("rice-2", "Rice 2", aliases=aliases)
+    aliases.append("mutated")
+    assert alias_item.aliases == ("grain",)
+
+    lots = [lot]
+    inventory = InventorySnapshot(lots)
+    lots.clear()
+    assert inventory.lots == (lot,)
+
+    offers = [offer]
+    market = MarketSnapshot(now, offers)
+    offers.clear()
+    assert market.offers == (offer,)
+
+    demands = [Demand(rice, Quantity(500, "g"))]
+    problem = PlanningProblem(
+        demands,
+        inventory,
+        market,
+        PlanningPolicy(Money(1000, "KGS")),
+    )
+    demands.clear()
+    assert len(problem.demands) == 1
+
+    purchases = []
+    reasons = ["reason"]
+    plan = ProcurementPlan(
+        status=PlanStatus.INFEASIBLE,
+        purchases=purchases,
+        requirement_coverage=[],
+        projected_leftovers=[],
+        total_cost=Money(0, "KGS"),
+        budget_remaining=Money(1000, "KGS"),
+        infeasibility_reasons=reasons,
+    )
+    purchases.append("mutated")
+    reasons.append("mutated")
+    assert plan.purchases == ()
+    assert plan.infeasibility_reasons == ("reason",)

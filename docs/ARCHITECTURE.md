@@ -512,6 +512,17 @@ MultiObjectivePolicy.zero(currency)
 
 `ObjectiveBreakdown` не считается доверенным только потому, что его создал planner. `validate_multi_objective_plan()` независимо пересчитывает seller set, surplus penalties, store penalty и minimum M1 cost из исходного `PlanningProblem`.
 
+### I14. Snapshot и policy действительно иммутабельны
+
+Публичные domain records захватывают входные collection values как immutable tuples. Переданный caller-ом `list` не остаётся скрытой mutable ссылкой внутри `InventorySnapshot`, `MarketSnapshot`, `PlanningProblem`, `ProcurementPlan` или `MultiObjectivePolicy`.
+
+```text
+external list mutation != snapshot mutation
+external list mutation != policy mutation
+```
+
+Это необходимо для гарантии воспроизводимости: фиксированные problem/policy должны оставаться фиксированными после создания объектов.
+
 ---
 
 ## 5. Модули

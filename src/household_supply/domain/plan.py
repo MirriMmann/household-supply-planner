@@ -26,6 +26,9 @@ class PlanningProblem:
     market: MarketSnapshot
     policy: PlanningPolicy
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "demands", tuple(self.demands))
+
 
 class PlanStatus(StrEnum):
     FEASIBLE = "feasible"
@@ -106,3 +109,17 @@ class ProcurementPlan:
     warnings: tuple[str, ...] = ()
     explanation: tuple[str, ...] = ()
     objective_breakdown: ObjectiveBreakdown | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "purchases", tuple(self.purchases))
+        object.__setattr__(
+            self, "requirement_coverage", tuple(self.requirement_coverage)
+        )
+        object.__setattr__(
+            self, "projected_leftovers", tuple(self.projected_leftovers)
+        )
+        object.__setattr__(
+            self, "infeasibility_reasons", tuple(self.infeasibility_reasons)
+        )
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "explanation", tuple(self.explanation))

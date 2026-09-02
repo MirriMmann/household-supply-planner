@@ -322,6 +322,8 @@ existing M1 / M3 planner
 - SKU identity не выводится из product title;
 - seller scope фиксирован как `globus-online-demo`;
 - страница обязана явно подтверждать addressless/demo scope; DOM-позиция marker не считается частью контракта;
+- price/availability читаются только из bounded product surface и не могут протечь из рекомендаций/cart/footer;
+- скидочная current price требует явного контекста либо exact-consistent пары `current/regular + discount percent`; просто меньшая цена не считается evidence, а неоднозначные разные цены fail-closed;
 - redirect не может изменить product identity или вывести запрос за `https://globus-online.kg`;
 - live HTTP имеет timeout и response-size bound;
 - CI использует injected transport и не зависит от retailer/network;

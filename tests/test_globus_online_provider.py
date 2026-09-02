@@ -69,7 +69,9 @@ def _page(
 
 MILK_HTML = _page(
     "Молоко Хорошее дело ультрапаст 2,5% 1л",
-    "<div>1 шт.</div><div>13%</div><div>121,49\u202fсом вместо обычной цены 147\u202fсом</div><button>В корзину</button>",
+    "<div>1 шт.</div><div>13%</div><div>147\u202fсом</div>"
+    "<div>121,49\u202fсом вместо обычной цены 147\u202fсом</div>"
+    "<button>В корзину</button>",
 )
 OIL_HTML = _page(
     "Масло подсолнечное Олейна 1л",
@@ -186,6 +188,80 @@ def test_parser_handles_thousands_separator_and_requires_buy_action_for_availabl
     with pytest.raises(GlobusOnlineParseError, match="add-to-cart"):
         parse_globus_online_demo_product(_page("Milk", "<div>125 сом</div>"))
 
+
+def test_parser_rejects_ambiguous_multiple_product_prices_without_current_price_context() -> None:
+    html = _page(
+        "Milk",
+        "<div>147 сом</div><div>121 сом</div><button>В корзину</button>",
+    )
+    with pytest.raises(GlobusOnlineParseError, match="multiple ambiguous"):
+        parse_globus_online_demo_product(html)
+
+
+def test_parser_resolves_discount_pair_when_raw_dom_omits_discount_phrase() -> None:
+    html = _page(
+        "Milk",
+        "<div>17%</div>"
+        "<div>121,49 сом</div><div>147 сом</div>"
+        "<div>121,49 сом</div><div>147 сом</div>"
+        "<button>В корзину</button>",
+    )
+
+    parsed = parse_globus_online_demo_product(html)
+
+    assert parsed.price == Money(Decimal("121.49"), "KGS")
+    assert parsed.available is True
+
+
+def test_parser_rejects_two_prices_when_discount_percent_is_inconsistent() -> None:
+    html = _page(
+        "Milk",
+        "<div>5%</div><div>121,49 сом</div><div>147 сом</div>"
+        "<button>В корзину</button>",
+    )
+
+    with pytest.raises(GlobusOnlineParseError, match="multiple ambiguous"):
+        parse_globus_online_demo_product(html)
+
+
+def test_discount_pair_resolution_is_independent_of_decimal_context_precision() -> None:
+    from decimal import localcontext
+
+    html = _page(
+        "Milk",
+        "<div>17%</div><div>121,49 сом</div><div>147 сом</div>"
+        "<button>В корзину</button>",
+    )
+    results = []
+    for precision in (6, 12, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            results.append(parse_globus_online_demo_product(html).price)
+
+    assert results == [Money(Decimal("121.49"), "KGS")] * 4
+
+
+def test_parser_does_not_leak_market_facts_from_content_below_product_surface() -> None:
+    available_html = (
+        "<html><body><header>Укажите адрес доставки Корзина</header>"
+        "<h1>Milk</h1><div>125 сом</div><button>В корзину</button>"
+        "<hr><section><h2>Recommendations</h2>"
+        "<div>Other item Раскупили 99 сом/кг</div></section></body></html>"
+    )
+    parsed = parse_globus_online_demo_product(available_html)
+    assert parsed.available is True
+    assert parsed.price == Money(125, "KGS")
+
+    missing_target_price_html = (
+        "<html><body><header>Укажите адрес доставки Корзина</header>"
+        "<h1>Milk</h1><div>1 шт.</div><hr>"
+        "<section><h2>Recommendations</h2>"
+        "<div>Other item 99 сом</div><button>В корзину</button></section>"
+        "</body></html>"
+    )
+    with pytest.raises(GlobusOnlineParseError):
+        parse_globus_online_demo_product(missing_target_price_html)
+
 def test_listing_accepts_only_canonical_official_good_urls() -> None:
     assert GlobusOnlineListing(MILK_URL).external_product_id.startswith("23df")
 
@@ -194,11 +270,30 @@ def test_listing_accepts_only_canonical_official_good_urls() -> None:
         "https://example.com/ru-kg/good/abcdefgh",
         "https://globus-online.kg/ru-kg/catalog/grocery",
         "https://globus-online.kg/not-a-locale/good/abcdefgh",
+        "https://globus-online.kg/extra/ru-kg/good/abcdefgh",
         "https://globus-online.kg/ru-kg/good/abcdefgh?x=1",
         "https://user@globus-online.kg/ru-kg/good/abcdefgh",
     ):
         with pytest.raises(ValueError):
             GlobusOnlineListing(bad)
+
+
+def test_transport_and_provider_reject_non_finite_or_boolean_bounds() -> None:
+    from household_supply.market.providers import UrllibHttpTextTransport
+
+    with pytest.raises(TypeError, match="max_response_bytes"):
+        UrllibHttpTextTransport(max_response_bytes=True)
+    with pytest.raises(ValueError, match="user_agent"):
+        UrllibHttpTextTransport(user_agent="   ")
+
+    transport = UrllibHttpTextTransport()
+    for timeout in (float("nan"), float("inf"), True):
+        with pytest.raises(TypeError, match="timeout_seconds"):
+            transport.get(MILK_URL, timeout_seconds=timeout)
+        with pytest.raises(TypeError, match="timeout_seconds"):
+            GlobusOnlineDemoProvider(
+                (GlobusOnlineListing(MILK_URL),), timeout_seconds=timeout
+            )
 
 
 def test_provider_emits_attributable_observations_from_explicit_pages() -> None:

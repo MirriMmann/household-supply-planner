@@ -495,7 +495,11 @@ provider_id = globus-online-demo
 seller_id   = globus-online-demo
 ```
 
-Публичная страница должна давать явное evidence addressless/demo scope: прямой marker `Это демо-каталог` либо официальный no-address state `Укажите адрес доставки` на той же Globus product surface. DOM-позиция marker не является частью контракта. Поэтому наблюдение нельзя случайно представить как address-specific store evidence. Address-scoped integration в будущем должна иметь отдельную attributable seller/provider boundary.
+Публичная страница должна давать явное evidence addressless/demo scope: прямой marker `Это демо-каталог` либо официальный no-address state `Укажите адрес доставки` вместе с Globus cart surface. DOM-позиция marker не является частью контракта. Поэтому наблюдение нельзя случайно представить как address-specific store evidence. Address-scoped integration в будущем должна иметь отдельную attributable seller/provider boundary.
+
+Scope evidence и product facts имеют разные поверхности. Demo/addressless evidence может находиться в header/footer всей страницы, но цена, availability и `В корзину` извлекаются только из bounded product surface после целевого `<h1>` и до структурной границы (`hr`, следующий heading, `aside` или `footer`). Поэтому market facts соседней рекомендации или cart drawer не могут быть присвоены целевому listing.
+
+Если product surface публикует скидочную форму `CURRENT сом вместо обычной цены OLD сом`, current price извлекается из явного discount context. Реальный Globus raw DOM может дублировать current/regular price и не сохранять эту человеческую фразу как один непрерывный текст. Поэтому разрешён второй bounded discount contract: на product surface должны существовать ровно две distinct KGS-цены и ровно один discount percent; меньшая цена принимается как current только если exact rational arithmetic подтверждает соответствие displayed percentage с допуском в один процентный пункт на UI-округление. Сам факт `min(price)` никогда не является достаточным evidence. Все остальные multiple-price случаи считаются ambiguous и fail-closed.
 
 HTTP mechanism ограничен:
 
@@ -505,7 +509,10 @@ HTTP mechanism ограничен:
 - timeout обязателен;
 - response body имеет max-size bound;
 - принимается только HTML/XHTML;
-- inline script/style/template text не участвует в price/availability parsing.
+- inline script/style/template text не участвует в price/availability parsing;
+- product facts не читаются из content ниже structural product boundary;
+- canonical URL path должен точно соответствовать `/<locale>/good/<product-id>`;
+- ambiguous multiple prices fail-closed.
 
 M5 поддерживает только piece-priced packaged listings. `сом/кг` отклоняется как unsupported semantics вместо ложного преобразования в условную упаковку 1 kg.
 

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from html.parser import HTMLParser
+from fractions import Fraction
+from math import isfinite
 import re
 from typing import Callable, Protocol, runtime_checkable
 from urllib.parse import urlparse
@@ -21,6 +23,15 @@ _UNAVAILABLE_MARKERS = ("раскупили", "разобрали", "нет в �
 _ADD_TO_CART_MARKER = "в корзину"
 _PRICE_RE = re.compile(
     r"(?P<amount>\d(?:[\d\s\u00a0\u202f]*\d)?(?:[,.]\d+)?)\s*сом(?P<perkg>\s*/\s*кг)?",
+    re.IGNORECASE,
+)
+_DISCOUNT_CURRENT_PRICE_RE = re.compile(
+    r"(?P<amount>\d(?:[\d\s\u00a0\u202f]*\d)?(?:[,.]\d+)?)"
+    r"\s*сом\s+вместо\s+обычной\s+цены",
+    re.IGNORECASE,
+)
+_DISCOUNT_PERCENT_RE = re.compile(
+    r"(?<![\d,.])(?P<percent>\d{1,2}(?:[,.]\d+)?)\s*%",
     re.IGNORECASE,
 )
 _GOOD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,}$")
@@ -87,14 +98,29 @@ class UrllibHttpTextTransport:
     max_response_bytes: int = 2_000_000
 
     def __post_init__(self) -> None:
+        if (
+            not isinstance(self.max_response_bytes, int)
+            or isinstance(self.max_response_bytes, bool)
+        ):
+            raise TypeError("max_response_bytes must be int")
         if self.max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be positive")
+        user_agent = self.user_agent.strip()
+        if not user_agent:
+            raise ValueError("user_agent must not be empty")
+        object.__setattr__(self, "user_agent", user_agent)
 
     def get(self, url: str, *, timeout_seconds: float) -> HttpTextResponse:
         try:
             _validate_globus_good_url(url)
         except ValueError as exc:
             raise GlobusOnlineFetchError("invalid Globus request URL") from exc
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not isfinite(float(timeout_seconds))
+        ):
+            raise TypeError("timeout_seconds must be a finite real number")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         request = Request(
@@ -161,6 +187,7 @@ class _ProductPageParser(HTMLParser):
         self._h1_depth = 0
         self._ignored_depth = 0
         self._seen_h1 = False
+        self._product_surface_closed = False
         self._title_parts: list[str] = []
         self._after_h1_parts: list[str] = []
         self._visible_parts: list[str] = []
@@ -170,9 +197,21 @@ class _ProductPageParser(HTMLParser):
         if lowered in {"script", "style", "template", "noscript"}:
             self._ignored_depth += 1
             return
-        if lowered == "h1" and not self._ignored_depth:
-            self._h1_depth += 1
-            self._seen_h1 = True
+        if lowered == "h1":
+            if not self._seen_h1:
+                self._h1_depth = 1
+                self._seen_h1 = True
+            elif not self._h1_depth:
+                self._product_surface_closed = True
+            return
+        if self._seen_h1 and not self._h1_depth and lowered in {
+            "hr",
+            "h2",
+            "h3",
+            "aside",
+            "footer",
+        }:
+            self._product_surface_closed = True
 
     def handle_endtag(self, tag: str) -> None:
         lowered = tag.lower()
@@ -189,7 +228,7 @@ class _ProductPageParser(HTMLParser):
         self._visible_parts.append(data)
         if self._h1_depth:
             self._title_parts.append(data)
-        elif self._seen_h1:
+        elif self._seen_h1 and not self._product_surface_closed:
             self._after_h1_parts.append(data)
 
     @property
@@ -247,12 +286,13 @@ def _external_product_id(url: str) -> str:
     path = urlparse(url).path.rstrip("/")
     parts = path.split("/")
     if (
-        len(parts) < 4
-        or parts[-2] != "good"
-        or parts[-3] not in {"ru-kg", "ky-kg"}
+        len(parts) != 4
+        or parts[0] != ""
+        or parts[2] != "good"
+        or parts[1] not in {"ru-kg", "ky-kg"}
     ):
-        raise ValueError("Globus listing URL must point to /<locale>/good/<product-id>")
-    product_id = parts[-1]
+        raise ValueError("Globus listing URL must point exactly to /<locale>/good/<product-id>")
+    product_id = parts[3]
     if not _GOOD_ID_RE.fullmatch(product_id):
         raise ValueError("Globus product id has an unsupported format")
     return product_id
@@ -306,8 +346,40 @@ def parse_globus_online_demo_product(html: str) -> GlobusOnlineParsedProduct:
         )
 
     price = None
-    if price_matches:
-        price = Money(_parse_decimal_amount(price_matches[0].group("amount")), "KGS")
+    discounted = _DISCOUNT_CURRENT_PRICE_RE.search(visible)
+    if discounted is not None:
+        price = Money(_parse_decimal_amount(discounted.group("amount")), "KGS")
+    elif price_matches:
+        distinct_amounts = tuple(
+            dict.fromkeys(_parse_decimal_amount(match.group("amount")) for match in price_matches)
+        )
+        if len(distinct_amounts) == 1:
+            price = Money(distinct_amounts[0], "KGS")
+        elif len(distinct_amounts) == 2:
+            discount_percent_matches = tuple(
+                dict.fromkeys(
+                    _parse_decimal_amount(match.group("percent"))
+                    for match in _DISCOUNT_PERCENT_RE.finditer(visible)
+                )
+            )
+            current_amount, regular_amount = sorted(distinct_amounts)
+            if len(discount_percent_matches) == 1 and regular_amount > 0:
+                observed_percent = discount_percent_matches[0]
+                implied_percent = (
+                    Fraction(regular_amount - current_amount)
+                    * 100
+                    / Fraction(regular_amount)
+                )
+                # Retailer UI rounds the displayed discount percentage to a whole
+                # number. Allow one percentage point of display-rounding slack, but
+                # compare exact rationals so ambient Decimal precision cannot alter
+                # acquisition semantics.
+                if abs(implied_percent - Fraction(observed_percent)) <= 1:
+                    price = Money(current_amount, "KGS")
+        if price is None:
+            raise GlobusOnlineParseError(
+                "Globus product surface exposes multiple ambiguous KGS prices"
+            )
     if available and _ADD_TO_CART_MARKER not in lowered:
         raise GlobusOnlineParseError(
             "Globus page does not expose an add-to-cart action for an available listing"
@@ -353,6 +425,12 @@ class GlobusOnlineDemoProvider:
         )
         if not listings:
             raise ValueError("Globus provider requires at least one listing")
+        if (
+            not isinstance(self.timeout_seconds, (int, float))
+            or isinstance(self.timeout_seconds, bool)
+            or not isfinite(float(self.timeout_seconds))
+        ):
+            raise TypeError("Globus timeout_seconds must be a finite real number")
         if self.timeout_seconds <= 0:
             raise ValueError("Globus timeout_seconds must be positive")
         keys = [(listing.seller_id, listing.external_product_id) for listing in listings]

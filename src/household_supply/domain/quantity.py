@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from ._decimal import add_decimals_exact, shift_decimal_exact
 from .money import DecimalLike, as_decimal
 
 
@@ -17,30 +18,6 @@ _UNIT_TABLE: dict[str, tuple[str, int, str]] = {
     "pcs": ("count", 0, "piece"),
 }
 
-
-def _shift_decimal_exact(value: Decimal, decimal_places: int) -> Decimal:
-    parts = value.as_tuple()
-    return Decimal((parts.sign, parts.digits, parts.exponent + decimal_places))
-
-
-def _add_decimals_exact(left: Decimal, right: Decimal) -> Decimal:
-    """Add two finite Decimals without applying the active context precision."""
-
-    left_tuple = left.as_tuple()
-    right_tuple = right.as_tuple()
-    exponent = min(left_tuple.exponent, right_tuple.exponent)
-
-    def coefficient(value: Decimal, target_exponent: int) -> int:
-        parts = value.as_tuple()
-        digits = int("".join(str(digit) for digit in parts.digits) or "0")
-        if parts.sign:
-            digits = -digits
-        return digits * (10 ** (parts.exponent - target_exponent))
-
-    total = coefficient(left, exponent) + coefficient(right, exponent)
-    sign = 1 if total < 0 else 0
-    digits = tuple(int(character) for character in str(abs(total))) or (0,)
-    return Decimal((sign, digits, exponent))
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +45,7 @@ class Quantity:
 
     @property
     def base_amount(self) -> Decimal:
-        return _shift_decimal_exact(self.amount, _UNIT_TABLE[self.unit][1])
+        return shift_decimal_exact(self.amount, _UNIT_TABLE[self.unit][1])
 
     def compatible_with(self, other: Quantity) -> bool:
         return self.dimension == other.dimension
@@ -81,7 +58,7 @@ class Quantity:
                 f"incompatible quantity units: {self.unit} + {other.unit}"
             )
         return Quantity(
-            _add_decimals_exact(self.base_amount, other.base_amount),
+            add_decimals_exact(self.base_amount, other.base_amount),
             self.base_unit,
         )
 
@@ -95,7 +72,7 @@ class Quantity:
                 f"incompatible quantity units: {self.unit} -> {normalized_target}"
             )
         return Quantity(
-            _shift_decimal_exact(self.base_amount, -target_shift),
+            shift_decimal_exact(self.base_amount, -target_shift),
             normalized_target,
         )
 

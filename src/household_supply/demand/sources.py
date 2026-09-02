@@ -3,15 +3,40 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from household_supply.domain.demand import Demand
+from household_supply.domain._decimal import scale_decimal_ratio_up
 from household_supply.domain.items import Item
 from household_supply.domain.quantity import Quantity
 from household_supply.domain.recipes import MealRequest
 
 
+RECIPE_SCALING_DECIMAL_PLACES = 12
+
+
+@dataclass(frozen=True, slots=True)
+class DemandContribution:
+    """One attributable, positive contribution emitted by a DemandSource."""
+
+    source_id: str
+    contribution_id: str
+    item: Item
+    quantity: Quantity
+
+    def __post_init__(self) -> None:
+        normalized_source_id = self.source_id.strip()
+        normalized_contribution_id = self.contribution_id.strip()
+        if not normalized_source_id:
+            raise ValueError("contribution source id must not be empty")
+        if not normalized_contribution_id:
+            raise ValueError("contribution id must not be empty")
+        if self.quantity.amount <= 0:
+            raise ValueError("demand contribution quantity must be positive")
+        object.__setattr__(self, "source_id", normalized_source_id)
+        object.__setattr__(self, "contribution_id", normalized_contribution_id)
+
+
 @runtime_checkable
 class DemandSource(Protocol):
-    """A bounded producer of demand contributions.
+    """A bounded producer of attributable demand contributions.
 
     A demand source describes *why* an item is needed. It does not inspect
     inventory, market offers, budget, or planner state.
@@ -20,7 +45,7 @@ class DemandSource(Protocol):
     @property
     def source_id(self) -> str: ...
 
-    def emit_demands(self) -> tuple[Demand, ...]: ...
+    def emit_contributions(self) -> tuple[DemandContribution, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,14 +73,15 @@ class ExplicitNeedSource:
         object.__setattr__(self, "source_id", normalized_id)
         object.__setattr__(self, "needs", normalized_needs)
 
-    def emit_demands(self) -> tuple[Demand, ...]:
+    def emit_contributions(self) -> tuple[DemandContribution, ...]:
         return tuple(
-            Demand(
+            DemandContribution(
+                source_id=self.source_id,
+                contribution_id=f"explicit:{index}",
                 item=need.item,
                 quantity=need.quantity,
-                source=f"explicit:{self.source_id}",
             )
-            for need in self.needs
+            for index, need in enumerate(self.needs)
         )
 
 
@@ -74,20 +100,25 @@ class MealDemandSource:
         object.__setattr__(self, "source_id", normalized_id)
         object.__setattr__(self, "meals", normalized_meals)
 
-    def emit_demands(self) -> tuple[Demand, ...]:
-        emitted: list[Demand] = []
+    def emit_contributions(self) -> tuple[DemandContribution, ...]:
+        emitted: list[DemandContribution] = []
         for meal_index, meal in enumerate(self.meals):
-            scale = meal.servings / meal.recipe.servings
-            for ingredient in meal.recipe.ingredients:
+            for ingredient_index, ingredient in enumerate(meal.recipe.ingredients):
                 base = ingredient.quantity.as_base()
+                scaled_amount = scale_decimal_ratio_up(
+                    base.base_amount,
+                    meal.servings,
+                    meal.recipe.servings,
+                    decimal_places=RECIPE_SCALING_DECIMAL_PLACES,
+                )
                 emitted.append(
-                    Demand(
-                        item=ingredient.item,
-                        quantity=Quantity(base.base_amount * scale, base.base_unit),
-                        source=(
-                            f"meal:{self.source_id}:"
-                            f"{meal_index}:{meal.recipe.id}"
+                    DemandContribution(
+                        source_id=self.source_id,
+                        contribution_id=(
+                            f"meal:{meal_index}:{meal.recipe.id}:{ingredient_index}"
                         ),
+                        item=ingredient.item,
+                        quantity=Quantity(scaled_amount, base.base_unit),
                     )
                 )
         return tuple(emitted)

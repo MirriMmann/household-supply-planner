@@ -361,3 +361,40 @@ def test_mixed_package_combination_can_beat_every_single_sku_strategy() -> None:
     ]
     assert plan.total_cost == Money(160, "KGS")
     assert leftover(plan, "rice").quantity == Quantity(200, "g")
+
+
+def test_planner_is_independent_of_ambient_decimal_context() -> None:
+    from decimal import localcontext
+
+    now = datetime(2026, 9, 2, tzinfo=UTC)
+    item = Item("bulk", "Bulk")
+    sku = SKU(
+        "bulk-pack",
+        item,
+        "Bulk pack",
+        Quantity("50000000.000000001", "g"),
+    )
+    offer = Offer(
+        "bulk-offer",
+        sku,
+        "store",
+        Money("123456789.123456789", "KGS"),
+        now,
+        "fixture",
+    )
+    problem = PlanningProblem(
+        demands=(Demand(item, Quantity("123456789.123456789", "g")),),
+        inventory=InventorySnapshot(),
+        market=MarketSnapshot(now, (offer,)),
+        policy=PlanningPolicy(Money("1000000000", "KGS")),
+    )
+
+    plans = []
+    for precision in (6, 12, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            plans.append(build_plan(problem))
+
+    assert plans == [plans[0]] * 4
+    assert plans[0].purchases[0].packs == 3
+    assert plans[0].total_cost == Money("370370367.370370367", "KGS")

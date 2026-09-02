@@ -6,15 +6,15 @@ from household_supply.domain.demand import Demand
 from household_supply.domain.items import Item
 from household_supply.domain.quantity import Quantity
 
-from .sources import DemandSource
+from .sources import DemandContribution, DemandSource
 
 
 @dataclass(frozen=True, slots=True)
 class DemandCompilation:
-    """Normalized demands plus their exact source contributions."""
+    """Normalized demands plus their exact attributable source contributions."""
 
     demands: tuple[Demand, ...]
-    contributions: tuple[Demand, ...]
+    contributions: tuple[DemandContribution, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +30,8 @@ def compile_demand_sources(
         raise ValueError("at least one demand source is required")
 
     source_ids: set[str] = set()
-    contributions: list[Demand] = []
+    contribution_keys: set[tuple[str, str]] = set()
+    contributions: list[DemandContribution] = []
 
     for source in sources:
         source_id = source.source_id.strip()
@@ -40,15 +41,23 @@ def compile_demand_sources(
             raise ValueError(f"duplicate demand source id: {source_id}")
         source_ids.add(source_id)
 
-        emitted = tuple(source.emit_demands())
+        emitted = tuple(source.emit_contributions())
         if not emitted:
-            raise ValueError(f"demand source emitted no demands: {source_id}")
-        for demand in emitted:
-            if demand.quantity.amount <= 0:
+            raise ValueError(f"demand source emitted no contributions: {source_id}")
+        for contribution in emitted:
+            if contribution.source_id != source_id:
                 raise ValueError(
-                    f"demand source emitted non-positive quantity: {source_id}"
+                    "demand contribution source attribution mismatch: "
+                    f"expected {source_id}, got {contribution.source_id}"
                 )
-            contributions.append(demand)
+            key = (source_id, contribution.contribution_id)
+            if key in contribution_keys:
+                raise ValueError(
+                    "duplicate demand contribution id: "
+                    f"{source_id}/{contribution.contribution_id}"
+                )
+            contribution_keys.add(key)
+            contributions.append(contribution)
 
     aggregates: dict[str, _Aggregate] = {}
     for contribution in contributions:

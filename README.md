@@ -211,10 +211,11 @@ M1 остаётся неизменным procurement-ядром, а M2 доба�
 - bounded package-aware baseline planner;
 - `Recipe` / `RecipeIngredient` / `MealRequest`;
 - `DemandSource` как отдельная граница;
+- `DemandContribution` с явными `source_id` и `contribution_id`;
 - `MealDemandSource` и `ExplicitNeedSource`;
-- точный пересчёт порций без `float`;
+- детерминированное масштабирование порций без `float` и без зависимости от глобального `decimal` context;
 - aggregation одинаковых Items между рецептами и разными sources;
-- сохранение исходных contributions рядом с нормализованным `Demand[]`;
+- сохранение атрибутируемых contributions рядом с нормализованным `Demand[]`;
 - inventory reconciliation выполняется только после demand compilation;
 - существующий M1 planner не знает, откуда появился demand.
 
@@ -227,7 +228,7 @@ M1 остаётся неизменным procurement-ядром, а M2 доба�
 
 ## Текущая исполнимая гарантия
 
-> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`; после этого M1 при фиксированных inventory, market и policy детерминированно строит валидный план закупки либо явно возвращает `infeasible`.
+> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`; результат не зависит от ambient `decimal` precision. После этого M1 при фиксированных inventory, market и policy детерминированно строит валидный план закупки либо явно возвращает `infeasible`.
 
 Проверка из активированного виртуального окружения:
 

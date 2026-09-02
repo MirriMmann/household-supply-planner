@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 from itertools import product
 
 from household_supply.domain import (
@@ -13,6 +13,13 @@ from household_supply.domain import (
     Purchase,
     Quantity,
     RequirementCoverage,
+)
+
+from household_supply.domain._decimal import (
+    add_decimals_exact,
+    ceil_decimal_ratio_exact,
+    multiply_decimal_by_int_exact,
+    subtract_decimals_exact,
 )
 
 from .compile import CompiledRequirement, compile_requirements
@@ -29,9 +36,7 @@ _MAX_COMBINATIONS_PER_ITEM = 200_000
 
 
 def _ceil_ratio(numerator: Decimal, denominator: Decimal) -> int:
-    if denominator <= 0:
-        raise ValueError("denominator must be positive")
-    return int((numerator / denominator).to_integral_value(rounding=ROUND_CEILING))
+    return ceil_decimal_ratio_exact(numerator, denominator)
 
 
 def _solve_item(
@@ -90,14 +95,20 @@ def _solve_item(
         for count, (offer, package) in zip(counts, compatible_offers, strict=True):
             if count == 0:
                 continue
-            total_quantity += package.base_amount * count
-            total_cost += offer.price.amount * count
+            total_quantity = add_decimals_exact(
+                total_quantity, multiply_decimal_by_int_exact(package.base_amount, count)
+            )
+            total_cost = add_decimals_exact(
+                total_cost, multiply_decimal_by_int_exact(offer.price.amount, count)
+            )
             total_packs += count
 
         if total_quantity < requirement.net_required.base_amount:
             continue
 
-        surplus = total_quantity - requirement.net_required.base_amount
+        surplus = subtract_decimals_exact(
+            total_quantity, requirement.net_required.base_amount
+        )
         key = (total_cost, surplus, total_packs, counts)
         if best_key is None or key < best_key:
             best_key = key
@@ -113,7 +124,10 @@ def _solve_item(
     for count, (offer, package) in zip(best_counts, compatible_offers, strict=True):
         if count == 0:
             continue
-        acquired = Quantity(package.base_amount * count, package.base_unit)
+        acquired = Quantity(
+            multiply_decimal_by_int_exact(package.base_amount, count),
+            package.base_unit,
+        )
         purchase_cost = offer.price * count
         purchases.append(
             Purchase(
@@ -123,7 +137,9 @@ def _solve_item(
                 cost=purchase_cost,
             )
         )
-        purchased_amount += acquired.base_amount
+        purchased_amount = add_decimals_exact(
+            purchased_amount, acquired.base_amount
+        )
         cost = cost + purchase_cost
 
     return _ItemSolution(
@@ -168,7 +184,9 @@ def build_plan(problem: PlanningProblem) -> ProcurementPlan:
         minimum_required_cost = minimum_required_cost + solution.cost
 
     if minimum_required_cost.amount > problem.policy.budget.amount:
-        shortage = minimum_required_cost.amount - problem.policy.budget.amount
+        shortage = subtract_decimals_exact(
+            minimum_required_cost.amount, problem.policy.budget.amount
+        )
         return ProcurementPlan(
             status=PlanStatus.INFEASIBLE,
             purchases=(),
@@ -194,12 +212,20 @@ def build_plan(problem: PlanningProblem) -> ProcurementPlan:
     for requirement in requirements:
         solution = item_solutions[requirement.item_id]
         purchases.extend(solution.purchases)
-        covered_amount = requirement.inventory_used.base_amount + solution.purchased.base_amount
-        leftover_amount = (
-            requirement.inventory_available.base_amount
-            - requirement.inventory_used.base_amount
-            + max(Decimal("0"), covered_amount - requirement.required.base_amount)
+        covered_amount = add_decimals_exact(
+            requirement.inventory_used.base_amount, solution.purchased.base_amount
         )
+        unused_inventory = subtract_decimals_exact(
+            requirement.inventory_available.base_amount,
+            requirement.inventory_used.base_amount,
+        )
+        overbuy = max(
+            Decimal("0"),
+            subtract_decimals_exact(
+                covered_amount, requirement.required.base_amount
+            ),
+        )
+        leftover_amount = add_decimals_exact(unused_inventory, overbuy)
         coverage.append(
             RequirementCoverage(
                 item_id=requirement.item_id,

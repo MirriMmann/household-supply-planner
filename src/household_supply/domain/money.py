@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import TypeAlias
 
+from ._decimal import (
+    add_decimals_exact,
+    multiply_decimal_by_int_exact,
+    subtract_decimals_exact,
+)
+
 
 DecimalLike: TypeAlias = Decimal | int | str
 
@@ -52,17 +58,17 @@ class Money:
         if not isinstance(other, Money):
             return NotImplemented
         self._check_currency(other)
-        return Money(self.amount + other.amount, self.currency)
+        return Money(add_decimals_exact(self.amount, other.amount), self.currency)
 
     def __sub__(self, other: Money) -> Money:
         if not isinstance(other, Money):
             return NotImplemented
         self._check_currency(other)
-        return Money(self.amount - other.amount, self.currency)
+        return Money(subtract_decimals_exact(self.amount, other.amount), self.currency)
 
     def __mul__(self, multiplier: int) -> Money:
         if not isinstance(multiplier, int) or isinstance(multiplier, bool):
             return NotImplemented
-        return Money(self.amount * multiplier, self.currency)
+        return Money(multiply_decimal_by_int_exact(self.amount, multiplier), self.currency)
 
     __rmul__ = __mul__

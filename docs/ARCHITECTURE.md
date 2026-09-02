@@ -235,11 +235,13 @@ M2 реализует `ExplicitNeedSource` и `MealDemandSource`. Оба ист�
 `DemandCompilation` хранит две поверхности:
 
 ```text
-contributions[]  # точные вклады конкретных sources
+contributions[]  # DemandContribution: attributable source inputs
 demands[]        # нормализованный aggregate по Item
 ```
 
-Так provenance не приходится кодировать в арифметику planner-а. `compile_demand_sources()` проверяет уникальность source IDs, совместимость единиц и непротиворечивую Item identity, после чего детерминированно сортирует нормализованный demand по `item.id`.
+`DemandContribution` отдельно фиксирует `source_id`, `contribution_id`, Item и Quantity. Compiler проверяет, что contribution действительно принадлежит тому `DemandSource`, который её вернул, и запрещает повтор одного contribution ID внутри source. Поэтому provenance не сводится к произвольной строке внутри `Demand` и не приходится кодировать в арифметику planner-а.
+
+`compile_demand_sources()` также проверяет уникальность source IDs, совместимость единиц и непротиворечивую Item identity, после чего детерминированно сортирует нормализованный demand по `item.id`.
 
 Рецепты входят через `MealDemandSource`, не изменяя planner.
 
@@ -262,14 +264,17 @@ RecipeIngredient
 - quantity
 ```
 
-`MealRequest` связывает рецепт с фактически нужным количеством порций. Масштабирование выполняется точно через `Decimal`:
+`MealRequest` связывает рецепт с фактически нужным количеством порций. Входные значения хранятся как точные конечные `Decimal`, а масштабирование выполняется через точное рациональное отношение, не используя ambient `decimal.getcontext()`:
 
 ```text
-scale = requested_servings / recipe.servings
-ingredient demand = ingredient.quantity * scale
+exact ratio = requested_servings / recipe.servings
+scaled ingredient = ingredient.quantity * exact ratio
+canonical result = round upward to 12 decimal places in the base unit
 ```
 
-`float` для servings намеренно не принимается: компиляция demand должна быть воспроизводимой и не вносить двоичную погрешность до planner-а.
+Некоторые отношения, например `1 / 3`, не имеют конечного Decimal-представления. Для них M2 фиксирует каноническую resolution policy: 12 знаков после запятой в базовой единице (`g`, `ml`, `piece`) с округлением вверх. Это делает результат воспроизводимым и не занижает demand из-за округления.
+
+`float` для servings намеренно не принимается: компиляция demand не должна вносить двоичную погрешность до planner-а.
 
 ```text
 Recipe != MealRequest

@@ -24,6 +24,7 @@ from .domain import (
 )
 from .demand import (
     DemandCompilation,
+    DemandContribution,
     DemandSource,
     ExplicitNeed,
     ExplicitNeedSource,
@@ -36,6 +37,7 @@ __all__ = [
     "CurrencyMismatchError",
     "Demand",
     "DemandCompilation",
+    "DemandContribution",
     "DemandSource",
     "ExplicitNeed",
     "ExplicitNeedSource",

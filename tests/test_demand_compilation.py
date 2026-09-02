@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
 from household_supply import (
+    DemandContribution,
     ExplicitNeed,
     ExplicitNeedSource,
     InventoryLot,
@@ -71,7 +72,7 @@ def test_meal_scaling_preserves_exact_decimal_values() -> None:
     compilation = compile_demand_sources((source,))
 
     assert compilation.demands[0].quantity == Quantity(500, "g")
-    assert compilation.demands[0].quantity.amount == Decimal("500.0")
+    assert compilation.demands[0].quantity.amount == Decimal("500.000000000000")
 
 
 def test_same_item_is_aggregated_across_multiple_recipes() -> None:
@@ -114,9 +115,13 @@ def test_same_item_is_aggregated_across_meal_and_explicit_sources() -> None:
 
     assert demands["rice"] == Quantity(500, "g")
     assert demands["chicken"] == Quantity(400, "g")
-    assert {entry.source for entry in compilation.contributions} == {
-        "meal:meal-plan:0:chicken-rice",
-        "explicit:extra-rice",
+    assert {
+        (entry.source_id, entry.contribution_id)
+        for entry in compilation.contributions
+    } == {
+        ("meal-plan", "meal:0:chicken-rice:0"),
+        ("meal-plan", "meal:0:chicken-rice:1"),
+        ("extra-rice", "explicit:0"),
     }
 
 
@@ -313,10 +318,10 @@ def test_compiler_rejects_missing_or_empty_demand_sources() -> None:
     class EmptySource:
         source_id = "empty"
 
-        def emit_demands(self):
+        def emit_contributions(self):
             return ()
 
-    with pytest.raises(ValueError, match="emitted no demands"):
+    with pytest.raises(ValueError, match="emitted no contributions"):
         compile_demand_sources((EmptySource(),))
 
 
@@ -341,3 +346,76 @@ def test_demand_aggregation_is_independent_of_source_order() -> None:
     assert forward.demands[0].quantity == Quantity(
         "1.6666666666666666666666666666", "g"
     )
+
+
+def test_meal_scaling_is_independent_of_ambient_decimal_context() -> None:
+    rice = Item("rice", "Rice")
+    recipe = Recipe(
+        "thirds",
+        "Thirds",
+        3,
+        (RecipeIngredient(rice, Quantity(1, "kg")),),
+    )
+    source = MealDemandSource("meal", (MealRequest(recipe, 1),))
+
+    results = []
+    for precision in (6, 12, 28, 50):
+        with localcontext() as context:
+            context.prec = precision
+            results.append(compile_demand_sources((source,)).demands[0].quantity)
+
+    assert results == [Quantity("333.333333333334", "g")] * 4
+
+
+def test_meal_scaling_rounds_repeating_ratio_up_at_canonical_resolution() -> None:
+    rice = Item("rice", "Rice")
+    recipe = Recipe(
+        "thirds",
+        "Thirds",
+        3,
+        (RecipeIngredient(rice, Quantity(1, "g")),),
+    )
+
+    compilation = compile_demand_sources(
+        (MealDemandSource("meal", (MealRequest(recipe, 1),)),)
+    )
+
+    assert compilation.demands[0].quantity == Quantity(
+        "0.333333333334", "g"
+    )
+
+
+def test_compiler_owns_source_attribution() -> None:
+    rice = Item("rice", "Rice")
+
+    class ImpersonatingSource:
+        source_id = "actual-source"
+
+        def emit_contributions(self):
+            return (
+                DemandContribution(
+                    source_id="other-source",
+                    contribution_id="fake",
+                    item=rice,
+                    quantity=Quantity(100, "g"),
+                ),
+            )
+
+    with pytest.raises(ValueError, match="source attribution mismatch"):
+        compile_demand_sources((ImpersonatingSource(),))
+
+
+def test_compiler_rejects_duplicate_contribution_ids_within_source() -> None:
+    rice = Item("rice", "Rice")
+
+    class DuplicateContributionSource:
+        source_id = "source"
+
+        def emit_contributions(self):
+            return (
+                DemandContribution("source", "same", rice, Quantity(100, "g")),
+                DemandContribution("source", "same", rice, Quantity(200, "g")),
+            )
+
+    with pytest.raises(ValueError, match="duplicate demand contribution id"):
+        compile_demand_sources((DuplicateContributionSource(),))

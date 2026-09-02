@@ -137,6 +137,8 @@ existing M1 planner
 
 Planner из M1 не должен знать, что часть demand появилась из рецептов.
 
+M2 также фиксирует attributable `DemandContribution` и детерминированную recipe-scaling policy: repeating Decimal ratios округляются вверх до 12 знаков в базовой единице, независимо от ambient `decimal` context.
+
 ### Доказано
 
 - точный пересчёт порций на `Decimal`;

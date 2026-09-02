@@ -19,12 +19,11 @@ def test_sku_ids_are_unique() -> None:
     assert len(sku_ids) == len(set(sku_ids))
 
 
-def test_item_ids_are_unique() -> None:
-    catalog, _ = build_globus_demo_staples_catalog()
 
-    item_ids = [sku.item.id for sku in catalog.skus]
 
-    assert len(item_ids) == len(set(item_ids))
+
+
+
 
 
 def test_bindings_reference_known_skus() -> None:

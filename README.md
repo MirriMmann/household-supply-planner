@@ -241,6 +241,8 @@ product title != product identity
 
 Каждый admitted Offer сохраняет `OfferProvenance` с provider/listing identity, observation ID и source reference. Поэтому planner получает чистый snapshot, а acquisition layer сохраняет происхождение решения.
 
+`MarketCompilation` является не просто удобной парой `snapshot + dispositions`, а self-contained proof record: он сохраняет exact `CatalogSnapshot`, canonical acquisition batches и `MarketCompilationPolicy` и при создании повторно выводит ожидаемый результат из этой basis. Поэтому вручную подложенный `RESOLVED`, неверный Offer/provenance или неправильный temporal selection не может маскироваться под результат M4 compiler.
+
 Подробнее:
 
 - [Архитектура](docs/ARCHITECTURE.md)

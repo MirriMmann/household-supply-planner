@@ -72,65 +72,7 @@ class MarketObservationDisposition:
                 and self.resolution.status is not CatalogResolutionStatus.CONFLICT
             ):
                 raise ValueError("conflict disposition carries non-conflict resolution")
-
-
-@dataclass(frozen=True, slots=True)
-class MarketCompilation:
-    snapshot: MarketSnapshot
-    dispositions: tuple[MarketObservationDisposition, ...]
-
-    def __post_init__(self) -> None:
-        dispositions = tuple(self.dispositions)
-        seen_refs: set[tuple[str, str]] = set()
-        accepted: dict[tuple[str, str], MarketObservationDisposition] = {}
-        for disposition in dispositions:
-            observation = disposition.observation
-            ref = (observation.provider_id, observation.id)
-            if ref in seen_refs:
-                raise ValueError("market compilation contains duplicate observation disposition")
-            seen_refs.add(ref)
-            if disposition.status is MarketObservationDispositionStatus.ACCEPTED:
-                accepted[ref] = disposition
-
-        represented: set[tuple[str, str]] = set()
-        for offer in self.snapshot.offers:
-            provenance = offer.provenance
-            if provenance is None:
-                raise ValueError("compiled market offer lacks structured provenance")
-            ref = (provenance.listing_key.provider_id, provenance.observation_id)
-            disposition = accepted.get(ref)
-            if disposition is None:
-                raise ValueError("compiled market offer has no accepted observation disposition")
-            observation = disposition.observation
-            resolution = disposition.resolution
-            assert resolution is not None and resolution.sku is not None
-            if ref in represented:
-                raise ValueError("accepted observation is represented by multiple offers")
-            if offer.sku != resolution.sku:
-                raise ValueError("compiled offer SKU does not match catalog resolution")
-            if offer.price != observation.price:
-                raise ValueError("compiled offer price does not match observation")
-            if offer.available is not observation.available:
-                raise ValueError("compiled offer availability does not match observation")
-            if offer.observed_at != observation.observed_at:
-                raise ValueError("compiled offer observed_at does not match observation")
-            if offer.source != observation.provider_id or offer.seller_id != observation.seller_id:
-                raise ValueError("compiled offer attribution does not match observation")
-            if provenance.listing_key != observation.listing_key:
-                raise ValueError("compiled offer listing provenance does not match observation")
-            represented.add(ref)
-
-        if represented != set(accepted):
-            raise ValueError("accepted market observation is missing from compiled snapshot")
-        object.__setattr__(self, "dispositions", dispositions)
-
-    @property
-    def accepted_observations(self) -> tuple[MarketObservation, ...]:
-        return tuple(
-            disposition.observation
-            for disposition in self.dispositions
-            if disposition.status is MarketObservationDispositionStatus.ACCEPTED
-        )
+        object.__setattr__(self, "detail", self.detail.strip())
 
 
 def _stable_offer_id(observation: MarketObservation) -> str:
@@ -146,32 +88,31 @@ def _ensure_aware(value: datetime, *, label: str) -> None:
         raise ValueError(f"{label} must be timezone-aware")
 
 
-def compile_market_snapshot(
-    catalog: CatalogSnapshot,
+def _normalize_batches(
     batches: tuple[MarketAcquisitionBatch, ...] | list[MarketAcquisitionBatch],
     *,
     captured_at: datetime,
-    policy: MarketCompilationPolicy | None = None,
-) -> MarketCompilation:
-    """Compile attributable provider observations into a canonical market snapshot.
-
-    For each exact external listing key, only the latest observation is eligible.
-    Ties at the same latest timestamp are rejected as conflicts instead of being
-    resolved by arbitrary input order.
-    """
-
-    _ensure_aware(captured_at, label="market compilation captured_at")
-    effective_policy = policy or MarketCompilationPolicy()
-    normalized_batches = tuple(batches)
-
-    observations: list[MarketObservation] = []
+) -> tuple[MarketAcquisitionBatch, ...]:
+    canonical_batches: list[MarketAcquisitionBatch] = []
     seen_observation_refs: set[tuple[str, str]] = set()
-    for batch in normalized_batches:
+    for batch in tuple(batches):
         if batch.acquired_at > captured_at:
             raise ValueError(
                 "market acquisition batch was acquired after requested snapshot time"
             )
-        for observation in batch.observations:
+        observations = tuple(
+            sorted(
+                batch.observations,
+                key=lambda observation: (
+                    observation.provider_id,
+                    observation.seller_id,
+                    observation.external_product_id,
+                    observation.observed_at,
+                    observation.id,
+                ),
+            )
+        )
+        for observation in observations:
             ref = (batch.provider_id, observation.id)
             if ref in seen_observation_refs:
                 raise ValueError(
@@ -179,7 +120,40 @@ def compile_market_snapshot(
                     f"{batch.provider_id}:{observation.id}"
                 )
             seen_observation_refs.add(ref)
-            observations.append(observation)
+        canonical_batches.append(
+            MarketAcquisitionBatch(batch.provider_id, batch.acquired_at, observations)
+        )
+    canonical_batches.sort(
+        key=lambda batch: (
+            batch.provider_id,
+            batch.acquired_at,
+            tuple(
+                (
+                    observation.seller_id,
+                    observation.external_product_id,
+                    observation.observed_at,
+                    observation.id,
+                )
+                for observation in batch.observations
+            ),
+        )
+    )
+    return tuple(canonical_batches)
+
+
+def _compile_market_data(
+    catalog: CatalogSnapshot,
+    batches: tuple[MarketAcquisitionBatch, ...] | list[MarketAcquisitionBatch],
+    *,
+    captured_at: datetime,
+    policy: MarketCompilationPolicy,
+) -> tuple[MarketSnapshot, tuple[MarketObservationDisposition, ...]]:
+    normalized_batches = _normalize_batches(batches, captured_at=captured_at)
+    observations = [
+        observation
+        for batch in normalized_batches
+        for observation in batch.observations
+    ]
 
     grouped: dict[object, list[MarketObservation]] = {}
     for observation in observations:
@@ -230,9 +204,8 @@ def compile_market_snapshot(
 
         observation = latest[0]
         if (
-            effective_policy.max_observation_age is not None
-            and captured_at - observation.observed_at
-            > effective_policy.max_observation_age
+            policy.max_observation_age is not None
+            and captured_at - observation.observed_at > policy.max_observation_age
         ):
             dispositions.append(
                 MarketObservationDisposition(
@@ -300,7 +273,86 @@ def compile_market_snapshot(
             disposition.observation.id,
         )
     )
+    return (
+        MarketSnapshot(captured_at=captured_at, offers=tuple(offers)),
+        tuple(dispositions),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MarketCompilation:
+    """Self-contained proof record for one market snapshot compilation.
+
+    The exact catalog, acquisition batches, and policy are retained so a
+    manually constructed record cannot forge catalog resolution, temporal
+    latest-selection, provenance, or planner-facing Offer identity.
+    """
+
+    catalog: CatalogSnapshot
+    batches: tuple[MarketAcquisitionBatch, ...]
+    policy: MarketCompilationPolicy
+    snapshot: MarketSnapshot
+    dispositions: tuple[MarketObservationDisposition, ...]
+
+    def __post_init__(self) -> None:
+        batches = _normalize_batches(
+            self.batches, captured_at=self.snapshot.captured_at
+        )
+        dispositions = tuple(self.dispositions)
+        expected_snapshot, expected_dispositions = _compile_market_data(
+            self.catalog,
+            batches,
+            captured_at=self.snapshot.captured_at,
+            policy=self.policy,
+        )
+        if self.snapshot != expected_snapshot:
+            raise ValueError(
+                "market compilation snapshot does not match its catalog/acquisition basis"
+            )
+        if dispositions != expected_dispositions:
+            raise ValueError(
+                "market compilation dispositions do not match its catalog/acquisition basis"
+            )
+        object.__setattr__(self, "batches", batches)
+        object.__setattr__(self, "dispositions", dispositions)
+
+    @property
+    def accepted_observations(self) -> tuple[MarketObservation, ...]:
+        return tuple(
+            disposition.observation
+            for disposition in self.dispositions
+            if disposition.status is MarketObservationDispositionStatus.ACCEPTED
+        )
+
+
+def compile_market_snapshot(
+    catalog: CatalogSnapshot,
+    batches: tuple[MarketAcquisitionBatch, ...] | list[MarketAcquisitionBatch],
+    *,
+    captured_at: datetime,
+    policy: MarketCompilationPolicy | None = None,
+) -> MarketCompilation:
+    """Compile attributable provider observations into a canonical market snapshot.
+
+    For each exact external listing key, only the latest observation is eligible.
+    Ties at the same latest timestamp are rejected as conflicts instead of being
+    resolved by arbitrary input order. The returned compilation retains the
+    exact immutable inputs needed to re-derive and validate the result.
+    """
+
+    _ensure_aware(captured_at, label="market compilation captured_at")
+    effective_policy = policy or MarketCompilationPolicy()
+    normalized_batches = _normalize_batches(batches, captured_at=captured_at)
+    snapshot, dispositions = _compile_market_data(
+        catalog,
+        normalized_batches,
+        captured_at=captured_at,
+        policy=effective_policy,
+    )
     return MarketCompilation(
-        snapshot=MarketSnapshot(captured_at=captured_at, offers=tuple(offers)),
-        dispositions=tuple(dispositions),
+        catalog=catalog,
+        batches=normalized_batches,
+        policy=effective_policy,
+        snapshot=snapshot,
+        dispositions=dispositions,
     )

@@ -455,7 +455,15 @@ OfferProvenance
 - source_ref
 ```
 
-`MarketCompilation` дополнительно проверяет внутреннюю согласованность: каждый admitted Offer обязан соответствовать ровно одному accepted observation и exact resolved SKU/price/availability/timestamp attribution.
+`MarketCompilation` хранит точную basis своей деривации:
+
+```text
+CatalogSnapshot
+MarketAcquisitionBatch[]
+MarketCompilationPolicy
+```
+
+и при создании повторно выводит ожидаемые dispositions и `MarketSnapshot`. Поэтому compilation record нельзя вручную собрать с поддельным `RESOLVED`, неверным latest selection, изменённым Offer ID/source_ref или другим planner-facing фактом, который не следует из сохранённой basis. Это делает `MarketCompilation` self-contained proof record, а не только контейнером результата.
 
 Unavailable latest observation тоже является валидным market state: она допускается как `Offer(available=False)`, после чего planner уже механически не рассматривает её как покупаемый candidate.
 

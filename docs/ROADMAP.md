@@ -260,6 +260,7 @@ MarketSnapshot
 - `MarketCompilationPolicy`;
 - `MarketObservationDisposition`;
 - `OfferProvenance`;
+- self-contained `MarketCompilation` basis (`CatalogSnapshot` + acquisition batches + policy);
 - `compile_market_snapshot()`.
 
 ### Identity policy
@@ -289,7 +290,7 @@ external listing != canonical SKU
 
 ### Definition of Done
 
-> Фиксированный набор attributable external observations и фиксированный Catalog детерминированно дают один `MarketCompilation`; только resolved и temporally admissible observations становятся `Offer`, provenance сохраняется, а resulting `MarketSnapshot` проходит через существующий M1/M3 planner без специальной market-adapter логики.
+> Фиксированный набор attributable external observations, Catalog и compilation policy детерминированно дают один self-validating `MarketCompilation`; только resolved и temporally admissible observations становятся `Offer`, exact derivation basis и provenance сохраняются, а resulting `MarketSnapshot` проходит через существующий M1/M3 planner без специальной market-adapter логики.
 
 ---
 

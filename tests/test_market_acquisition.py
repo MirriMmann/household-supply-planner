@@ -496,8 +496,11 @@ def test_market_compilation_rejects_forged_offer_without_accepted_disposition() 
 
     from household_supply import MarketCompilation
 
-    with pytest.raises(ValueError, match="no accepted observation disposition"):
+    with pytest.raises(ValueError, match="dispositions do not match"):
         MarketCompilation(
+            catalog=catalog,
+            batches=(batch,),
+            policy=MarketCompilationPolicy(),
             snapshot=good.snapshot,
             dispositions=(),
         )
@@ -512,10 +515,69 @@ def test_market_compilation_rejects_accepted_disposition_missing_from_snapshot()
 
     from household_supply import MarketCompilation, MarketSnapshot
 
-    with pytest.raises(ValueError, match="missing from compiled snapshot"):
+    with pytest.raises(ValueError, match="snapshot does not match"):
         MarketCompilation(
+            catalog=catalog,
+            batches=(batch,),
+            policy=MarketCompilationPolicy(),
             snapshot=MarketSnapshot(NOW, ()),
             dispositions=good.dispositions,
+        )
+
+
+
+
+def test_market_compilation_rejects_forged_catalog_resolution() -> None:
+    _, sku, catalog = _rice_catalog()
+    observation = _observation(package_quantity=Quantity(1, "kg"))
+    batch = MarketAcquisitionBatch("fixture", NOW, (observation,))
+
+    canonical = compile_market_snapshot(catalog, (batch,), captured_at=NOW)
+    assert canonical.snapshot.offers == ()
+    assert canonical.dispositions[0].status is MarketObservationDispositionStatus.CONFLICT
+
+    from household_supply import (
+        CatalogResolution,
+        MarketCompilation,
+        MarketObservationDisposition,
+        MarketSnapshot,
+        Offer,
+        OfferProvenance,
+    )
+
+    forged_resolution = CatalogResolution(
+        observation_id=observation.id,
+        status=CatalogResolutionStatus.RESOLVED,
+        sku=sku,
+        method=CatalogResolutionMethod.EXPLICIT_BINDING,
+        candidate_sku_ids=(sku.id,),
+    )
+    forged_disposition = MarketObservationDisposition(
+        observation=observation,
+        status=MarketObservationDispositionStatus.ACCEPTED,
+        resolution=forged_resolution,
+    )
+    forged_offer = Offer(
+        id="forged",
+        sku=sku,
+        seller_id=observation.seller_id,
+        price=observation.price,
+        observed_at=observation.observed_at,
+        source=observation.provider_id,
+        provenance=OfferProvenance(
+            observation_id=observation.id,
+            listing_key=observation.listing_key,
+            source_ref=observation.source_ref,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="snapshot does not match"):
+        MarketCompilation(
+            catalog=catalog,
+            batches=(batch,),
+            policy=MarketCompilationPolicy(),
+            snapshot=MarketSnapshot(NOW, (forged_offer,)),
+            dispositions=(forged_disposition,),
         )
 
 
@@ -557,10 +619,17 @@ def test_market_compilation_captures_dispositions_by_value() -> None:
 
     from household_supply import MarketCompilation
 
-    compilation = MarketCompilation(good.snapshot, dispositions)
+    compilation = MarketCompilation(
+        catalog=catalog,
+        batches=(batch,),
+        policy=MarketCompilationPolicy(),
+        snapshot=good.snapshot,
+        dispositions=dispositions,
+    )
     dispositions.clear()
 
     assert compilation.dispositions == good.dispositions
+    assert compilation.batches == good.batches
 
 
 def test_external_listing_identity_is_provider_scoped() -> None:

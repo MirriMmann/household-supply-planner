@@ -39,6 +39,7 @@ jobs:
           python examples/m4_market_acquisition.py
           python examples/m5_globus_provider.py
           python examples/m6_application_service.py
+          python examples/m7_plan_persistence.py
 
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

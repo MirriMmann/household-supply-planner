@@ -25,6 +25,7 @@ class MarketObservationDispositionStatus(StrEnum):
     ACCEPTED = "accepted"
     SUPERSEDED = "superseded"
     STALE = "stale"
+    UNAVAILABLE = "unavailable"
     UNRESOLVED = "unresolved"
     CONFLICT = "conflict"
 
@@ -54,6 +55,18 @@ class MarketObservationDisposition:
                 or self.resolution.status is not CatalogResolutionStatus.RESOLVED
             ):
                 raise ValueError("accepted market disposition requires resolved catalog identity")
+            if self.observation.price is None:
+                raise ValueError("accepted market disposition requires priced observation")
+        elif self.status is MarketObservationDispositionStatus.UNAVAILABLE:
+            if self.observation.available:
+                raise ValueError("unavailable disposition requires unavailable observation")
+            if (
+                self.resolution is None
+                or self.resolution.status is not CatalogResolutionStatus.RESOLVED
+            ):
+                raise ValueError("unavailable market disposition requires resolved catalog identity")
+            if self.observation.price is not None:
+                raise ValueError("unavailable disposition is reserved for observations without price")
         elif self.status is MarketObservationDispositionStatus.UNRESOLVED:
             if (
                 self.resolution is None
@@ -239,6 +252,18 @@ def _compile_market_data(
             continue
 
         assert resolution.sku is not None
+        if not observation.available and observation.price is None:
+            dispositions.append(
+                MarketObservationDisposition(
+                    observation=observation,
+                    status=MarketObservationDispositionStatus.UNAVAILABLE,
+                    resolution=resolution,
+                    detail="latest resolved listing is unavailable and exposes no price",
+                )
+            )
+            continue
+
+        assert observation.price is not None
         offer = Offer(
             id=_stable_offer_id(observation),
             sku=resolution.sku,

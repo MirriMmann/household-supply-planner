@@ -294,9 +294,60 @@ external listing != canonical SKU
 
 ---
 
-## M5 — Application Boundary
+## M5 — Real Market Provider Vertical Slice
 
-Цель: добавить тонкую прикладную поверхность вокруг уже доказанных M1–M4 контрактов.
+**Статус: реализован.**
+
+Цель: доказать первый provider-independent → real-retailer vertical slice без переноса retailer semantics в planner.
+
+Первый источник — публичный **Globus Online demo catalog**.
+
+```text
+explicit Globus good URLs
+        ↓
+GlobusOnlineDemoProvider
+        ↓
+MarketObservation[]
+        ↓
+existing M4 admission
+        ↓
+MarketSnapshot
+        ↓
+existing M1 / M3 planner
+```
+
+### Зафиксированные границы
+
+- provider не crawler и не search engine;
+- SKU identity не выводится из product title;
+- seller scope фиксирован как `globus-online-demo`;
+- страница обязана явно подтверждать addressless/demo scope; DOM-позиция marker не считается частью контракта;
+- price/availability читаются только из bounded product surface и не могут протечь из рекомендаций/cart/footer;
+- скидочная current price требует явного контекста либо exact-consistent пары `current/regular + discount percent`; просто меньшая цена не считается evidence, а неоднозначные разные цены fail-closed;
+- redirect не может изменить product identity или вывести запрос за `https://globus-online.kg`;
+- live HTTP имеет timeout и response-size bound;
+- CI использует injected transport и не зависит от retailer/network;
+- только piece-priced packaged goods допускаются в M5; `сом/кг` отклоняется до появления variable-weight model.
+
+### Реальный feedback в M4
+
+Unavailable retailer page может не содержать цену. M5 поэтому расширяет acquisition evidence:
+
+```text
+MarketObservation(price=None, available=False)
+```
+
+Такое latest evidence не создаёт fake Offer и не разрешает fallback на старую доступную цену.
+
+### Definition of Done
+
+> Explicitly configured Globus demo product pages через заменяемый HTTP transport дают attributable observations; M4 допускает их в `MarketSnapshot`, а M1/M3 используют snapshot без retailer-specific ветвлений. Demo/address scope и unsupported variable-weight semantics не скрываются.
+
+---
+
+## M6 — Application Boundary
+
+Цель: добавить тонкую прикладную поверхность вокруг уже доказанных M1–M5 контрактов.
 
 Возможный первый API:
 
@@ -317,7 +368,7 @@ API должен только:
 
 ---
 
-## M6 — Household State & Learning
+## M7 — Household State & Learning
 
 Цель: система начинает учитывать историю конкретного дома.
 
@@ -350,7 +401,7 @@ Recurring demand создаётся из оценок через отдельн�
 
 ---
 
-## M7 — Natural Language Interface
+## M8 — Natural Language Interface
 
 Только здесь появляется AI-интерпретация пользовательских запросов.
 

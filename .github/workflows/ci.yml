@@ -31,5 +31,10 @@ jobs:
       - name: Run tests
         run: pytest
 
+      - name: Run executable examples
+        run: |
+          python examples/m1_week_one.py
+          python examples/m2_meal_demand.py
+
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

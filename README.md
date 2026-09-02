@@ -200,23 +200,25 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M1 — Baseline Procurement Kernel реализован.**
+**M2 — Demand Compilation & Meals реализован.**
 
-Архитектурный M0 зафиксирован, а первый исполнимый vertical slice уже существует:
+M1 остаётся неизменным procurement-ядром, а M2 добавляет независимый слой происхождения потребности:
 
 - точные `Money` на `Decimal`;
 - нормализованные `Quantity` и совместимые единицы измерения;
 - разделение `Item / SKU / Offer`;
 - `InventorySnapshot` и `MarketSnapshot`;
-- `Demand -> inventory reconciliation -> net requirement`;
 - bounded package-aware baseline planner;
-- явные `feasible / infeasible` результаты;
-- hard budget;
-- plan validation;
-- runnable acceptance example;
-- adversarial regression tests.
+- `Recipe` / `RecipeIngredient` / `MealRequest`;
+- `DemandSource` как отдельная граница;
+- `MealDemandSource` и `ExplicitNeedSource`;
+- точный пересчёт порций без `float`;
+- aggregation одинаковых Items между рецептами и разными sources;
+- сохранение исходных contributions рядом с нормализованным `Demand[]`;
+- inventory reconciliation выполняется только после demand compilation;
+- существующий M1 planner не знает, откуда появился demand.
 
-Следующий продуктовый milestone — **M2: Demand Compilation & Meals**. Рецепты будут добавляться как источник demand, не как новое ядро planner.
+Следующий продуктовый milestone — **M3: Multi-objective Planning**: surplus/waste cost, стоимость дополнительных магазинов и объяснимый выбор между несколькими допустимыми планами.
 
 Подробнее:
 
@@ -225,13 +227,17 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущая исполнимая гарантия
 
-> При фиксированных inventory, market, demand и policy baseline planner детерминированно строит валидный план закупки либо явно возвращает `infeasible`.
+> При фиксированных demand sources M2 детерминированно компилирует нормализованный `Demand[]`; после этого M1 при фиксированных inventory, market и policy детерминированно строит валидный план закупки либо явно возвращает `infeasible`.
 
-Проверка:
+Проверка из активированного виртуального окружения:
 
 ```bash
-pytest
-PYTHONPATH=src python examples/m1_week_one.py
+python -m pip install -e ".[dev]"
+python -m pytest
+python examples/m1_week_one.py
+python examples/m2_meal_demand.py
 ```
 
-M1 намеренно не содержит авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.
+Проект использует `src/` layout, поэтому прямой запуск examples предполагает, что package установлен в окружение. Editable install выше одновременно делает локальные изменения сразу доступными examples и повторяет способ установки в CI.
+
+M1/M2 намеренно не содержит авторизацию, PostgreSQL, Redis, Docker-оркестрацию, frontend или AI. Они не нужны для доказанной способности ядра.

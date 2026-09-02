@@ -28,10 +28,7 @@ def _aggregate_demands(demands: tuple[Demand, ...]) -> dict[str, Quantity]:
                 f"incompatible demand units for item {demand.item.id}: "
                 f"{previous.unit} and {base.unit}"
             )
-        aggregated[demand.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
+        aggregated[demand.item.id] = previous + base
     return aggregated
 
 
@@ -48,10 +45,7 @@ def _aggregate_inventory(problem: PlanningProblem) -> dict[str, Quantity]:
                 f"incompatible inventory units for item {lot.item.id}: "
                 f"{previous.unit} and {base.unit}"
             )
-        aggregated[lot.item.id] = Quantity(
-            previous.base_amount + base.base_amount,
-            previous.base_unit,
-        )
+        aggregated[lot.item.id] = previous + base
     return aggregated
 
 

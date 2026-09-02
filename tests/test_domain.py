@@ -93,3 +93,12 @@ def test_decimal_domain_values_reject_non_finite_inputs(value: str) -> None:
         Money(value, "KGS")
     with pytest.raises(ValueError, match="must be finite"):
         Quantity(value, "g")
+
+
+def test_quantity_addition_is_exact_beyond_decimal_context_precision() -> None:
+    a = Quantity("1", "g")
+    b = Quantity("0.3333333333333333333333333333", "g")
+    c = Quantity("0.3333333333333333333333333333", "g")
+
+    assert (a + b) + c == a + (b + c)
+    assert (a + b) + c == Quantity("1.6666666666666666666666666666", "g")

@@ -230,11 +230,54 @@ StockThresholdSource
 FutureEventSource
 ```
 
-В первом milestone достаточно `ExplicitNeedSource`.
+M2 реализует `ExplicitNeedSource` и `MealDemandSource`. Оба источника производят только demand contributions и не получают доступ к inventory, market, budget или planner state.
 
-Рецепты добавляются позднее через `MealDemandSource`, не изменяя planner.
+`DemandCompilation` хранит две поверхности:
+
+```text
+contributions[]  # точные вклады конкретных sources
+demands[]        # нормализованный aggregate по Item
+```
+
+Так provenance не приходится кодировать в арифметику planner-а. `compile_demand_sources()` проверяет уникальность source IDs, совместимость единиц и непротиворечивую Item identity, после чего детерминированно сортирует нормализованный demand по `item.id`.
+
+Рецепты входят через `MealDemandSource`, не изменяя planner.
 
 ---
+
+
+### 3.6.1 Recipe / MealRequest
+
+`Recipe` описывает количество ингредиентов для базового числа порций:
+
+```text
+Recipe
+- id
+- name
+- servings
+- ingredients[]
+
+RecipeIngredient
+- item
+- quantity
+```
+
+`MealRequest` связывает рецепт с фактически нужным количеством порций. Масштабирование выполняется точно через `Decimal`:
+
+```text
+scale = requested_servings / recipe.servings
+ingredient demand = ingredient.quantity * scale
+```
+
+`float` для servings намеренно не принимается: компиляция demand должна быть воспроизводимой и не вносить двоичную погрешность до planner-а.
+
+```text
+Recipe != MealRequest
+MealRequest != Demand
+RecipeIngredient != SKU
+```
+
+Рецепт не знает ни о магазине, ни о цене, ни о домашних запасах.
 
 ### 3.7 HouseholdSnapshot
 

@@ -13,6 +13,7 @@ from .plan import (
     RequirementCoverage,
 )
 from .quantity import Quantity
+from .recipes import MealRequest, Recipe, RecipeIngredient
 
 __all__ = [
     "CurrencyMismatchError",
@@ -21,6 +22,7 @@ __all__ = [
     "InventorySnapshot",
     "Item",
     "MarketSnapshot",
+    "MealRequest",
     "Money",
     "Offer",
     "PlanStatus",
@@ -30,6 +32,8 @@ __all__ = [
     "ProjectedLeftover",
     "Purchase",
     "Quantity",
+    "Recipe",
+    "RecipeIngredient",
     "RequirementCoverage",
     "SKU",
 ]

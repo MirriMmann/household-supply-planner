@@ -41,6 +41,18 @@ from .persistence import (
     PlanRepositoryError,
 )
 from .service import ApplicationMarketError, PlanApplicationService
+from .replenishment import (
+    HouseholdReplenishmentPreparation,
+    HouseholdReplenishmentRequest,
+    HouseholdReplenishmentRequestError,
+    HouseholdReplenishmentResult,
+    HouseholdReplenishmentService,
+)
+from .replenishment_api import (
+    HouseholdReplenishmentJsonApi,
+    parse_household_replenishment_payload,
+    serialize_household_replenishment_result,
+)
 
 __all__ = [
     "ApplicationMarketError",
@@ -78,4 +90,12 @@ __all__ = [
     "serialize_plan_request",
     "serialize_plan_result",
     "validate_application_request_catalog",
+    "HouseholdReplenishmentJsonApi",
+    "HouseholdReplenishmentPreparation",
+    "HouseholdReplenishmentRequest",
+    "HouseholdReplenishmentRequestError",
+    "HouseholdReplenishmentResult",
+    "HouseholdReplenishmentService",
+    "parse_household_replenishment_payload",
+    "serialize_household_replenishment_result",
 ]

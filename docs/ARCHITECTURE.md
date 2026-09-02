@@ -818,11 +818,23 @@ Display daily-rate округляется детерминированно, но
 
 `HouseholdEventId` не перезаписывается. File repository публикует complete JSON record через no-overwrite operation и проверяет corruption digest при чтении. Digest не является подписью или authentication mechanism.
 
+### I32. Один replenishment run использует один household fact snapshot
+
+M9 читает `HouseholdHistory` один раз и выводит `HouseholdState` и `ConsumptionEstimate` из одного `as_of`. Concurrent append после snapshot относится уже к следующему run.
+
+### I33. Missing catalog need не игнорируется
+
+Если learned recurring или explicit need не может быть mapped к exact configured catalog Item, M9 fail closed до external acquisition. Неизвестная потребность не превращается в ноль.
+
+### I34. Replenishment workflow не подтверждает purchase
+
+Persisted `PlanRecord` остаётся recommendation/history of decision. Только отдельный подтверждённый `PurchaseEvent` меняет household facts.
+
 ---
 
 ## 5. Модули
 
-Актуальная логическая структура после M8:
+Актуальная логическая структура после M9:
 
 ```text
 src/household_supply/
@@ -1322,9 +1334,67 @@ RecurringNeedSource                 -> existing M2 demand compiler
 
 ---
 
-## 11. Что намеренно не входит в domain/planning core
+## 11. Household replenishment workflow (M9)
 
-Даже после M8 domain/planning core не включает:
+M9 является composition boundary над уже существующими capabilities, а не новым planner.
+
+```text
+HouseholdEventRepository
+        ↓ one history snapshot
+HouseholdHistory @ as_of
+        ├── project_household_state()
+        └── estimate_all_consumption()
+                    ↓
+      RecurringNeedSource + ExplicitNeedSource
+                    ↓
+              M2 DemandCompilation
+                    ↓
+              ApplicationPlanRequest
+                    ↓
+          M6 PlanApplicationService
+                    ↓
+           M7 PlanLifecycleService
+```
+
+`HouseholdReplenishmentPreparation` сохраняет request, exact catalog, history snapshot, `as_of`, state, estimates, demand compilation и derived application request. Объект self-validating: forged state/estimate/compilation/request отклоняется при construction.
+
+### Catalog boundary
+
+Recurring estimate обязан иметь exact Item identity, совместимую с configured `CatalogSnapshot`. Если catalog ещё не покрывает learned Item, workflow останавливается до market provider call. Это особенно важно пока M5.1 catalog pack расширяется параллельно.
+
+Household balances, которые не участвуют в текущем demand, не передаются в M6 inventory input. Поэтому наличие дома unrelated Item не требует его присутствия в текущем market catalog.
+
+### Demand composition
+
+M9 не суммирует demand вручную. Learned и explicit sources проходят через существующий M2 compiler:
+
+```text
+learned recurring ─┐
+                   ├─> compile_demand_sources() -> normalized Demand[]
+explicit needs ────┘
+```
+
+Таким образом provenance остаётся attributable, а planner получает уже нормализованные requirements.
+
+### Durable boundary
+
+`HouseholdReplenishmentService.create()` передаёт derived `ApplicationPlanRequest` существующему M7 `PlanLifecycleService`. `HouseholdReplenishmentResult` проверяет, что persisted `PlanRecord.request` точно совпадает с derived request.
+
+`HouseholdReplenishmentJsonApi` использует `POST /plans` для household-aware creation и делегирует history reads существующему M7 API. Generic ASGI adapter остаётся transport-only.
+
+```text
+POST /plans -> 201 household-aware persisted plan
+GET /plans/{id} -> existing exact historical record
+GET /plans?limit=N -> existing history summaries
+```
+
+Natural language остаётся следующим слоем и не нужен для M9 correctness.
+
+---
+
+## 12. Что намеренно не входит в domain/planning core
+
+Даже после M9 domain/planning core не включает:
 
 - HTTP/ASGI transport semantics;
 - UI;

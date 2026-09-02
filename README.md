@@ -200,43 +200,46 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M8 — Household State & Learning реализован.**
+**M9 — Household Replenishment Workflow реализован.**
 
-M1–M7 доказали deterministic planning, attributable market evidence, application/lifecycle boundaries и durable plan history. M8 впервые добавляет историю **конкретного household namespace** как набор явных фактов, а не скрытую память модели:
+M1–M8 доказали deterministic planning, live market evidence, durable plan history и replayable household state. M9 впервые собирает эти capabilities в одну household-aware прикладную операцию:
 
 ```text
-PurchaseEvent / InventoryCorrection / ConsumptionObservation
-        ↓
-HouseholdEventRepository
-        ↓
 HouseholdHistory
-        ├── deterministic HouseholdState projection
-        └── transparent ConsumptionEstimate
-                         ↓
-                 RecurringNeedSource
-                         ↓
-                M2 demand compilation
-                         ↓
-                 existing planner
++ horizon_days
++ optional explicit needs
++ budget
+        ↓
+HouseholdReplenishmentService
+        ↓
+HouseholdState + ConsumptionEstimate
+        ↓
+RecurringNeedSource + ExplicitNeedSource
+        ↓
+M2 DemandCompilation
+        ↓
+M6 ApplicationPlanRequest
+        ↓
+M6 market acquisition + M3 planner
+        ↓
+M7 persisted PlanRecord
 ```
 
-События immutable и append-only. `ProcurementPlan` сам по себе **не** создаёт `PurchaseEvent`: запланировать покупку и реально купить товар — разные факты. `InventoryCorrection` не редактирует прошлые события, а добавляет новое absolute observation. Историческая проекция учитывает не только effective time, но и `recorded_at`, поэтому поздно внесённая коррекция не меняет то, что система могла знать раньше.
+Workflow читает household history **один раз** и использует один `as_of` для state и consumption estimates. Поэтому concurrent append после snapshot не может сделать inventory и learned demand внутренне несогласованными.
 
-M8 learning остаётся полностью воспроизводимым. `ConsumptionEstimate` выводится только из explicit non-overlapping `ConsumptionObservation` и сохраняет:
+`ProcurementPlan` по-прежнему не создаёт `PurchaseEvent`: M9 заканчивается persisted recommendation, а факт совершённой покупки остаётся отдельным household observation.
 
-- weighted daily quantity;
-- sample count;
-- exact total consumed evidence;
-- exact observed microseconds;
-- observed duration;
-- min/max observed daily rate;
-- `uncertainty` как descriptive max-minus-min spread.
+M9 fail-closed, если learned recurring Item отсутствует в configured market catalog. Такая потребность не исчезает молча и не запускает network acquisition. Unrelated household inventory, которое не участвует в текущем compiled demand, не навязывается application market surface.
 
-`uncertainty` не выдаётся за confidence interval. Exact evidence сохраняется отдельно от rounded display estimate, поэтому `RecurringNeedSource` считает horizon напрямую из исходного рационального basis и округляет вверх только финальный demand.
+Отдельный `HouseholdReplenishmentJsonApi` использует durable `/plans` surface:
 
-Local-first event persistence реализована через `FileHouseholdEventRepository`: один integrity-checked JSON file на `HouseholdEventId`, no-overwrite identity и atomic hard-link publication. SHA-256 digest предназначен для corruption detection, а не для authentication.
+```text
+POST /plans          -> household-aware persisted plan
+GET  /plans/{id}     -> existing M7 historical record
+GET  /plans?limit=N  -> existing M7 recent history
+```
 
-M8 intentionally fail-closed на неоднозначной истории: overlapping consumption windows, расход выше tracked inventory, conflicting Item identity и `InventoryCorrection` внутри consumption interval не превращаются в молчаливую догадку.
+M6 `PlanJsonApi` и M7 `PlanLifecycleJsonApi` остаются отдельными embedding surfaces. Natural-language слой пока не нужен: будущий AI будет переводить пользовательскую фразу в уже доказанный `HouseholdReplenishmentRequest`, а не владеть household arithmetic, market truth или planner decisions.
 
 Подробнее:
 
@@ -245,7 +248,7 @@ M8 intentionally fail-closed на неоднозначной истории: ove
 
 ## Текущая исполнимая гарантия
 
-> Append-only household facts можно durability сохранить, детерминированно спроецировать в текущий inventory, вывести из explicit consumption observations прозрачную daily-rate estimate и превратить её в attributable recurring demand, который проходит через существующий M2/M3 planning core без скрытой model memory.
+> Budget + planning horizon + optional explicit needs можно объединить с одним replayable household snapshot и exact consumption evidence, скомпилировать в attributable demand, провести через существующий market/planner stack и сохранить как historical PlanRecord без новой planning authority.
 
 Проверка из активированного виртуального окружения:
 
@@ -260,6 +263,7 @@ python examples/m5_globus_provider.py
 python examples/m6_application_service.py
 python examples/m7_plan_persistence.py
 python examples/m8_household_learning.py
+python examples/m9_household_replenishment.py
 ```
 
 Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
@@ -269,4 +273,4 @@ python examples/m5_globus_live.py
 python examples/m6_globus_live.py
 ```
 
-CI остаётся полностью offline. M8 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.
+CI остаётся полностью offline. M9 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.

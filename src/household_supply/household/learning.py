@@ -51,10 +51,12 @@ def _fraction_to_decimal_half_even(
 
 @dataclass(frozen=True, slots=True)
 class ConsumptionEstimate:
-    """Transparent descriptive estimate derived only from recorded observations.
+    """Transparent descriptive rate estimate derived from explicit evidence.
 
-    ``uncertainty`` is the observed max-minus-min daily-rate spread. It is not a
-    confidence interval or probabilistic guarantee.
+    The historical field name ``total_consumed`` is retained for compatibility.
+    M10 depletion learning may also use this structure for positive/zero supply
+    depletion evidence; the estimate is still an inspectable deterministic rate,
+    not a probabilistic confidence claim.
     """
 
     item: Item
@@ -111,6 +113,116 @@ class ConsumptionEstimate:
                 "consumption estimate observed_days does not match exact duration basis"
             )
 
+    @property
+    def total_depleted(self) -> Quantity:
+        """Product-level name for the exact positive depletion evidence basis."""
+
+        return self.total_consumed
+
+
+@dataclass(frozen=True, slots=True)
+class UsageRateSample:
+    """One non-negative, bounded piece of usage/depletion rate evidence."""
+
+    evidence_id: str
+    item: Item
+    quantity: Quantity
+    period_start: datetime
+    period_end: datetime
+
+    def __post_init__(self) -> None:
+        evidence_id = self.evidence_id.strip()
+        if not evidence_id:
+            raise ValueError("usage-rate evidence id must not be empty")
+        if self.quantity.amount < 0:
+            raise ValueError("usage-rate evidence quantity must not be negative")
+        for label, value in (
+            ("period_start", self.period_start),
+            ("period_end", self.period_end),
+        ):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"usage-rate evidence {label} must be timezone-aware")
+        if self.period_end <= self.period_start:
+            raise ValueError("usage-rate evidence period_end must be after period_start")
+        object.__setattr__(self, "evidence_id", evidence_id)
+
+
+def estimate_usage_rate(
+    samples: tuple[UsageRateSample, ...],
+) -> ConsumptionEstimate | None:
+    """Estimate one rate from non-overlapping evidence using exact arithmetic.
+
+    Zero-quantity samples contribute observed time (important for depletion
+    learning) but an all-zero evidence set produces no recurring estimate.
+    """
+
+    samples = tuple(samples)
+    if not samples:
+        return None
+
+    ordered = sorted(
+        samples,
+        key=lambda sample: (sample.period_start, sample.period_end, sample.evidence_id),
+    )
+    item = ordered[0].item
+    base_unit = ordered[0].quantity.base_unit
+    previous: UsageRateSample | None = None
+    rates: list[Fraction] = []
+    total_base_amount = Decimal(0)
+    total_duration = 0
+
+    for sample in ordered:
+        if sample.item != item:
+            raise ConsumptionEstimationError(
+                f"conflicting consumption Item identity: {item.id}"
+            )
+        if sample.quantity.base_unit != base_unit:
+            raise ConsumptionEstimationError(
+                f"incompatible consumption units for item: {item.id}"
+            )
+        if previous is not None and sample.period_start < previous.period_end:
+            raise ConsumptionEstimationError(
+                "overlapping consumption evidence for item "
+                f"{item.id}: {previous.evidence_id} and {sample.evidence_id}"
+            )
+        duration = _duration_microseconds(sample.period_start, sample.period_end)
+        if duration <= 0:  # guarded by sample construction
+            raise AssertionError("usage-rate duration invariant violated")
+        base_amount = sample.quantity.base_amount
+        rates.append(Fraction(base_amount) * _MICROSECONDS_PER_DAY / duration)
+        total_base_amount = add_decimals_exact(total_base_amount, base_amount)
+        total_duration += duration
+        previous = sample
+
+    if total_base_amount == 0:
+        return None
+
+    weighted_daily = (
+        Fraction(total_base_amount) * _MICROSECONDS_PER_DAY / total_duration
+    )
+    daily_min_fraction = min(rates)
+    daily_max_fraction = max(rates)
+
+    daily_amount = _fraction_to_decimal_half_even(weighted_daily)
+    daily_min = _fraction_to_decimal_half_even(daily_min_fraction)
+    daily_max = _fraction_to_decimal_half_even(daily_max_fraction)
+    uncertainty = subtract_decimals_exact(daily_max, daily_min)
+    observed_days = _fraction_to_decimal_half_even(
+        Fraction(total_duration, _MICROSECONDS_PER_DAY)
+    )
+
+    return ConsumptionEstimate(
+        item=item,
+        daily_quantity=Quantity(daily_amount, base_unit),
+        sample_count=len(ordered),
+        observed_days=observed_days,
+        total_consumed=Quantity(total_base_amount, base_unit),
+        observed_microseconds=total_duration,
+        daily_min=Quantity(daily_min, base_unit),
+        daily_max=Quantity(daily_max, base_unit),
+        uncertainty=Quantity(uncertainty, base_unit),
+    )
+
 
 def _observations_for_item(
     history: HouseholdHistory,
@@ -143,76 +255,18 @@ def estimate_consumption(
     *,
     as_of: datetime | None = None,
 ) -> ConsumptionEstimate | None:
-    observations = list(_observations_for_item(history, item_id, as_of=as_of))
-    if not observations:
-        return None
-
-    item = observations[0].item
-    base_unit = observations[0].quantity_consumed.base_unit
-    for observation in observations:
-        if observation.item != item:
-            raise ConsumptionEstimationError(
-                f"conflicting consumption Item identity: {item_id}"
-            )
-        if observation.quantity_consumed.base_unit != base_unit:
-            raise ConsumptionEstimationError(
-                f"incompatible consumption units for item: {item_id}"
-            )
-
-    observations.sort(
-        key=lambda observation: (
-            observation.period_start,
-            observation.period_end,
-            observation.event_id.value,
+    observations = _observations_for_item(history, item_id, as_of=as_of)
+    samples = tuple(
+        UsageRateSample(
+            evidence_id=observation.event_id.value,
+            item=observation.item,
+            quantity=observation.quantity_consumed,
+            period_start=observation.period_start,
+            period_end=observation.period_end,
         )
+        for observation in observations
     )
-    previous: ConsumptionObservation | None = None
-    rates: list[Fraction] = []
-    total_base_amount = Decimal(0)
-    total_duration = 0
-    for observation in observations:
-        if previous is not None and observation.period_start < previous.period_end:
-            raise ConsumptionEstimationError(
-                "overlapping consumption observations for item "
-                f"{item_id}: {previous.event_id} and {observation.event_id}"
-            )
-        duration = _duration_microseconds(
-            observation.period_start, observation.period_end
-        )
-        if duration <= 0:  # guarded by event construction
-            raise AssertionError("consumption duration invariant violated")
-        base_amount = observation.quantity_consumed.base_amount
-        consumed = Fraction(base_amount)
-        rates.append(consumed * _MICROSECONDS_PER_DAY / duration)
-        total_base_amount = add_decimals_exact(total_base_amount, base_amount)
-        total_duration += duration
-        previous = observation
-
-    weighted_daily = (
-        Fraction(total_base_amount) * _MICROSECONDS_PER_DAY / total_duration
-    )
-    daily_min_fraction = min(rates)
-    daily_max_fraction = max(rates)
-
-    daily_amount = _fraction_to_decimal_half_even(weighted_daily)
-    daily_min = _fraction_to_decimal_half_even(daily_min_fraction)
-    daily_max = _fraction_to_decimal_half_even(daily_max_fraction)
-    uncertainty = subtract_decimals_exact(daily_max, daily_min)
-    observed_days = _fraction_to_decimal_half_even(
-        Fraction(total_duration, _MICROSECONDS_PER_DAY)
-    )
-
-    return ConsumptionEstimate(
-        item=item,
-        daily_quantity=Quantity(daily_amount, base_unit),
-        sample_count=len(observations),
-        observed_days=observed_days,
-        total_consumed=Quantity(total_base_amount, base_unit),
-        observed_microseconds=total_duration,
-        daily_min=Quantity(daily_min, base_unit),
-        daily_max=Quantity(daily_max, base_unit),
-        uncertainty=Quantity(uncertainty, base_unit),
-    )
+    return estimate_usage_rate(samples)
 
 
 def estimate_all_consumption(

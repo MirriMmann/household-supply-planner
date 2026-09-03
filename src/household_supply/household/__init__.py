@@ -1,3 +1,14 @@
+from .depletion import (
+    DepletionEstimationError,
+    DepletionLearningReport,
+    DepletionWindowStatus,
+    StocktakeDepletionWindow,
+    depletion_learning_report,
+    depletion_learning_reports,
+    derive_stocktake_depletion_windows,
+    estimate_all_depletion,
+    estimate_depletion,
+)
 from .events import (
     ConsumptionObservation,
     HouseholdEvent,
@@ -12,6 +23,8 @@ from .learning import (
     ESTIMATE_DECIMAL_PLACES,
     ConsumptionEstimate,
     ConsumptionEstimationError,
+    UsageRateSample,
+    estimate_usage_rate,
     estimate_all_consumption,
     estimate_consumption,
 )
@@ -34,6 +47,10 @@ from .recurring import RECURRING_NEED_DECIMAL_PLACES, RecurringNeedSource
 from .service import HouseholdLearningService
 
 __all__ = [
+    "DepletionEstimationError",
+    "DepletionLearningReport",
+    "DepletionWindowStatus",
+    "StocktakeDepletionWindow",
     "ConsumptionEstimate",
     "ConsumptionEstimationError",
     "ConsumptionObservation",
@@ -60,5 +77,12 @@ __all__ = [
     "event_effective_at",
     "event_kind",
     "project_household_state",
+    "depletion_learning_report",
+    "depletion_learning_reports",
+    "derive_stocktake_depletion_windows",
+    "estimate_all_depletion",
+    "estimate_depletion",
+    "UsageRateSample",
+    "estimate_usage_rate",
     "serialize_household_event",
 ]

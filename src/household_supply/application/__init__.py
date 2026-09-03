@@ -1,3 +1,20 @@
+from .household_operations import (
+    HouseholdOperationConflictError,
+    HouseholdOperationError,
+    HouseholdOperationsService,
+    HouseholdPlanNotFoundError,
+    PurchaseConfirmationCommand,
+    PurchaseConfirmationResult,
+    StocktakeCommand,
+)
+from .household_operations_api import (
+    HouseholdClosedLoopJsonApi,
+    parse_purchase_confirmation_payload,
+    parse_stocktake_payload,
+    serialize_depletion_report,
+    serialize_household_state,
+    serialize_purchase_confirmation,
+)
 from .asgi import JsonApiHandler, PlanAsgiApp
 from .cli import run_plan_cli
 from .json_api import (
@@ -55,6 +72,14 @@ from .replenishment_api import (
 )
 
 __all__ = [
+    "HouseholdClosedLoopJsonApi",
+    "HouseholdOperationConflictError",
+    "HouseholdOperationError",
+    "HouseholdOperationsService",
+    "HouseholdPlanNotFoundError",
+    "PurchaseConfirmationCommand",
+    "PurchaseConfirmationResult",
+    "StocktakeCommand",
     "ApplicationMarketError",
     "ApplicationPlanRequest",
     "ApplicationPlanResult",
@@ -89,6 +114,11 @@ __all__ = [
     "serialize_plan_record_summary",
     "serialize_plan_request",
     "serialize_plan_result",
+    "parse_purchase_confirmation_payload",
+    "parse_stocktake_payload",
+    "serialize_depletion_report",
+    "serialize_household_state",
+    "serialize_purchase_confirmation",
     "validate_application_request_catalog",
     "HouseholdReplenishmentJsonApi",
     "HouseholdReplenishmentPreparation",

@@ -200,65 +200,54 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M10 — Closed-Loop Household Operations & Depletion Learning реализован.**
+**M11 — Local Web MVP реализован.**
 
-M1–M9 построили deterministic planner, live market boundary, durable plan history, replayable household state и household-aware replenishment workflow. M10 впервые замыкает реальный пользовательский цикл без требования вручную логировать каждое потребление:
-
-```text
-stocktake
-   ↓
-InventoryCorrection
-   ↓
-M9 plan
-   ↓
-actual purchase confirmation
-   ↓
-PurchaseEvent
-   ↓
-later stocktake
-   ↓
-derived depletion evidence
-   ↓
-next M9 replenishment plan
-```
-
-Ключевая формула:
+M1–M10 уже дают deterministic planner, market evidence, durable plan history и closed-loop household operations. M11 впервые делает этот цикл доступным обычному локальному пользователю без ручной работы с Python/JSON:
 
 ```text
-inferred depletion =
-    start stock
-  + confirmed purchases
-  - end stock
+browser
+   ↓
+fixed local web assets
+   ↓
+existing M10 JSON API
+   ├── stocktake
+   ├── actual purchase
+   ├── depletion evidence
+   └── M9 replenishment plan
 ```
 
-Derived depletion **не является household event** и не меняет inventory второй раз. Source of truth остаются persisted `InventoryCorrection`, `PurchaseEvent` и optional direct `ConsumptionObservation`.
+Web shell не получает новую planning authority. JavaScript отображает server evidence и собирает typed JSON requests; budget arithmetic, depletion inference, market admission и purchase semantics остаются в существующих Python layers.
 
-Если interval показывает необъяснимое увеличение запасов или конфликтует с прямым consumption evidence, derived window не используется для recurring learning. Никакого negative consumption или скрытого исправления истории. Valid zero-depletion intervals учитывают observed time и могут снижать learned rate.
-
-Accepted stocktake window заменяет перекрывающий explicit consumption sample только в learning projection, чтобы физическая убыль не учитывалась дважды. Direct observations вне accepted windows продолжают работать как раньше.
-
-M9 теперь использует depletion-aware exact evidence basis. Legacy `ConsumptionEstimate.total_consumed` сохранён для compatibility, а M10 добавляет продуктовый alias `total_depleted`. Recurring demand по-прежнему считается из exact total + exact duration, не из округлённой display-rate.
-
-Добавлен единый closed-loop JSON surface:
+M11 добавляет read-only browser discovery endpoint:
 
 ```text
-GET  /household/state
-GET  /household/history
-GET  /household/estimates
-POST /household/stocktakes
-POST /household/purchases
-POST /plans/{plan_id}/purchases
-
-POST /plans                 # existing M9 replenishment
-GET  /plans/{id}            # existing M7 history
-GET  /plans?limit=N         # existing M7 history
+GET /catalog
 ```
 
-Каждый household mutation request создаёт максимум один event. Plan-linked purchase confirmation может отличаться от planned quantity; plan остаётся recommendation, а event описывает фактическую реальность. Historical plan SKU также проверяется против current catalog item/package identity перед attribution.
+Он публикует только canonical `Item`/`SKU` + package quantity, необходимые UI. Retailer listing keys, seller identity и observations не копируются в frontend catalog.
 
-Generic ASGI JSON boundary теперь reject'ит duplicate object keys и non-finite JSON numbers (`NaN`/`Infinity`) до application parsing.
+Local UI после первого usability pass русскоязычный и mobile-first. Основной экран использует человеческую модель вместо backend-терминов:
 
-Следующий milestone — **M11 Local Web MVP**, а Natural Language Interface сдвинут на M12: сначала нужно проверить реальный closed-loop UX, а уже потом улучшать способ ввода намерений.
+- `Покупки` — период, бюджет и только обязательные пожелания;
+- `Что дома` — быстрые варианты `Нет / Половина / 1 упаковка / 2 упаковки / Другое`;
+- `История` — прошлые списки, изменения запасов и простое объяснение того, что система уже поняла.
+
+Пользователь не выбирает `ml/g/l/kg` в основном stock-update flow и не видит `stocktake`, `depletion`, `explicit need`, `horizon` или `SKU` как продуктовые понятия. UI переводит упаковочные действия в точные typed `Quantity`, а backend contracts остаются прежними. Система предлагает список, человек только добавляет обязательные пожелания и после магазина подтверждает реальность.
+
+Статические assets раздаются только из фиксированного package-resource allowlist (`/`, `/assets/app.js`, `/assets/styles.css`): arbitrary filesystem path serving отсутствует. HTML получает restrictive same-origin CSP, `nosniff`, `DENY` framing и `no-referrer`.
+
+Runner по умолчанию bind'ится только на loopback (`127.0.0.1`). Web shell дополнительно reject'ит non-loopback/hostile `Host` headers и cross-origin unsafe requests, чтобы local bind не полагался только на сетевой интерфейс. Поскольку M11 ещё не имеет auth, попытка открыть unauthenticated UI на `0.0.0.0`/LAN fail-closed без explicit remote opt-in.
+
+Для локального запуска demo host:
+
+```bash
+python -m pip install -e ".[dev,web]"
+python examples/m11_local_web.py --serve
+```
+
+Затем открыть `http://127.0.0.1:8765/`. Demo host использует durable file repositories и offline fixture catalog/market; household/planning/persistence semantics при этом настоящие. Реальный расширенный Globus catalog может быть подключён тем же host boundary без изменения UI architecture.
+
+Следующий milestone — **M12 Natural Language Interface**, но только после повторной ручной проверки mass-market UX M11. AI должен переводить язык пользователя в typed request, а не становиться новым planner или источником market truth.
 
 Подробнее:
 
@@ -267,7 +256,7 @@ Generic ASGI JSON boundary теперь reject'ит duplicate object keys и non
 
 ## Текущая исполнимая гарантия
 
-> Реальные stocktake/purchase facts можно замкнуть в replayable household state, вывести из последовательных stocktake auditable depletion evidence и использовать её в следующем persisted M9 replenishment plan без двойного списания inventory или скрытого model state.
+> Русскоязычный local browser client может без знания backend-терминов отметить примерные остатки, получить список покупок, скорректировать обязательные товары и подтвердить фактическую покупку; exact quantities, planning и learning authority остаются в существующих backend layers.
 
 Проверка из активированного виртуального окружения:
 
@@ -284,6 +273,7 @@ python examples/m7_plan_persistence.py
 python examples/m8_household_learning.py
 python examples/m9_household_replenishment.py
 python examples/m10_closed_loop_household.py
+python examples/m11_local_web.py
 ```
 
 Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
@@ -293,4 +283,4 @@ python examples/m5_globus_live.py
 python examples/m6_globus_live.py
 ```
 
-CI остаётся полностью offline. M10 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.
+CI остаётся полностью offline. M11 добавляет packaged HTML/CSS/vanilla JS и optional `uvicorn` runtime extra, но по-прежнему не требует PostgreSQL, Redis, Docker orchestration, auth или LLM.

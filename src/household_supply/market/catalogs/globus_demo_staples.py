@@ -69,20 +69,6 @@ def build_globus_demo_staples_catalog() -> tuple[
             item_id="milk",
             item_name="Молоко",
             category="dairy",
-            sku_id="globus_milk_umut_1l",
-            sku_name="Молоко Умут и К 3,2% 1000г т/п",
-            package_amount="1",
-            package_unit="l",
-            brand="Умут и Ко",
-            url=(
-                "https://globus-online.kg/ru-kg/good/"
-                "3b709086a89e4a1ab6c238ca5cf1a742000100010000"
-            ),
-        ),
-        _make_product(
-            item_id="milk",
-            item_name="Молоко",
-            category="dairy",
             sku_id="globus_milk_belaya_reka_1l",
             sku_name="Молоко Белая Река ультрапаст 2,5% 1л т/п",
             package_amount="1",

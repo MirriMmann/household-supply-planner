@@ -88,3 +88,34 @@ def test_urls_are_globus_urls() -> None:
         )
         for listing in listings
     )
+
+
+def test_package_metadata_is_explicit_in_sku_name() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    unit_markers = {
+        "g": ("г", "гр"),
+        "kg": ("кг",),
+        "ml": ("мл",),
+        "l": ("л",),
+        "piece": ("шт",),
+        "pieces": ("шт",),
+        "pcs": ("шт",),
+    }
+
+    for sku in catalog.skus:
+        amount = format(sku.package_quantity.amount, "f")
+        if "." in amount:
+            amount = amount.rstrip("0").rstrip(".")
+
+        name = (
+            sku.name.casefold()
+            .replace(" ", "")
+            .replace("\u00a0", "")
+            .replace("\u202f", "")
+        )
+
+        assert any(
+            f"{amount}{marker}" in name
+            for marker in unit_markers[sku.package_quantity.unit]
+        ), sku.id

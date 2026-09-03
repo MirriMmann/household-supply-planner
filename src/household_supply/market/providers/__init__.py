@@ -1,3 +1,4 @@
+from .globus_catalog import GlobusCatalogProviderFactory
 from .globus_online import (
     GlobusOnlineDemoProvider,
     GlobusOnlineError,
@@ -13,6 +14,7 @@ from .globus_online import (
 )
 
 __all__ = [
+    "GlobusCatalogProviderFactory",
     "GlobusOnlineDemoProvider",
     "GlobusOnlineError",
     "GlobusOnlineFetchError",

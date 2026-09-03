@@ -753,7 +753,52 @@ M11 server не имеет auth, поэтому default host — loopback. Web s
 
 ---
 
-## M12 — Natural Language Interface
+## M11.2 — Request-Scoped Real Globus Web Integration
+
+**Статус: реализован.**
+
+Цель: подключить M5.1 real Globus catalog к существующему M11 browser client без превращения полного retailer catalog в обязательный network scan на каждый plan.
+
+```text
+HouseholdReplenishmentRequest
+        ↓
+ApplicationPlanRequest
+        ↓ demanded Item IDs
+DemandScopedPlanApplicationService
+        ↓
+GlobusCatalogProviderFactory
+        ↓ exact CatalogBinding selection
+GlobusOnlineDemoProvider(selected listings only)
+        ↓
+existing M4 compilation → M3 planner
+```
+
+Инварианты:
+
+- full M5.1 catalog остаётся canonical browser/planning catalog;
+- внешние listings выбираются только после normal catalog preflight;
+- selection использует exact binding identity, не fuzzy names;
+- request-scoped service не считает budget/demand/plan самостоятельно, а делегирует existing `PlanApplicationService`;
+- M7 lifecycle принимает общий `ApplicationPlanner` contract, поэтому persistence path не обходится;
+- offline M11 composition остаётся default и не требует сети;
+- live Globus composition включается явно через `--live-globus`;
+- offline/live profiles по умолчанию не делят один household data directory.
+
+Definition of Done:
+
+> Русский M11 UI может использовать полный M5.1 canonical catalog и получать live Globus evidence только для товаров, необходимых конкретному planning request, сохраняя прежние M4/M6/M7/M9/M10 authority boundaries и полностью offline CI path.
+
+---
+
+## M12 — First-Use Experience & Household Bootstrap
+
+Первый запуск должен позволять человеку начать пользоваться системой без README и без ручного описания всего дома. Основные задачи: быстрый выбор обычных домашних товаров, приблизительный initial stock через человеческие package-relative варианты и переход прямо к первому списку покупок.
+
+После этого проводится первый внешний usability pilot без подсказок. Natural Language Interface переносится на следующий milestone и остаётся typed adapter над deterministic workflow.
+
+---
+
+## M13 — Natural Language Interface
 
 Только после первого реального UI/pilot появляется AI-интерпретация пользовательских запросов.
 

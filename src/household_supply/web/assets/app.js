@@ -154,7 +154,7 @@ function packageText(count) {
 }
 
 function itemEmoji(itemId) {
-  const known = { milk: "🥛", rice: "🍚", oil: "🫗", eggs: "🥚", bread: "🍞" };
+  const known = { milk: "🥛", rice: "🍚", oil: "🫗", sunflower_oil: "🫗", pasta: "🍝", semolina: "🥣", canned_fish: "🐟", canned_peas: "🫛", seasoning: "🧂", eggs: "🥚", bread: "🍞", sugar: "🧊" };
   if (known[itemId]) return known[itemId];
   const category = itemById(itemId)?.category || "";
   if (category.includes("dairy")) return "🥛";

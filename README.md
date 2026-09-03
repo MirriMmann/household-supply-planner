@@ -1,294 +1,280 @@
+<div align="center">
+
 # Household Supply Planner
 
-> Рабочее техническое название. Продуктовое имя будет выбрано позже.
+### Покупки, которые учитывают то, что уже есть дома.
 
-**Household Supply Planner** — система планирования снабжения домохозяйства.
+**Local-first система планирования домашних запасов и закупок.**  
+Она хранит фактические остатки, учится по тому, что заканчивается, получает market evidence и строит детерминированный план покупки под бюджет.
 
-Цель проекта — не сделать ещё один список покупок и не обернуть рецепты в FastAPI. Система должна понимать будущие потребности дома, учитывать уже имеющиеся запасы, сопоставлять их с реальными вариантами покупки и строить объяснимый план закупки под ограничения пользователя.
+[![CI](https://github.com/MirriMmann/household-supply-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/MirriMmann/household-supply-planner/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-111111?logo=python&logoColor=white)
 
-Пример исходного запроса:
+</div>
 
-> «Мне нужно прожить одному неделю. Бюджет — 3000 KGS».
-
-В будущем система должна уметь превратить такой запрос примерно в следующий процесс:
+<br>
 
 ```text
-потребности на период
-        +
-текущие запасы дома
-        +
-доступные товары и цены
-        +
-бюджет / предпочтения / ограничения
+Что уже есть дома
         ↓
-задача планирования
+Что реально заканчивается
         ↓
-план закупки
+Что можно купить сейчас
         ↓
-что купить / где / сколько / почему
+Что стоит купить — и почему
 ```
 
-## Чем проект отличается от обычного meal planner
+Household Supply Planner — не ещё один grocery list и не каталог готовых рецептов.  
+Это маленькая planning system для повторяющихся домашних закупок:
 
-Рецепт — только один из возможных источников потребности.
+- она отделяет **потребность** от конкретного товара в магазине;
+- учитывает **то, что уже есть дома**;
+- рассматривает цену как **наблюдение рынка**, а не вечное свойство товара;
+- рассчитывает целые упаковки и бюджет **детерминированно**;
+- меняет household state только после **фактического подтверждения** человеком.
 
-Система проектируется вокруг пяти независимых частей:
+---
 
-1. **Demand** — что понадобится в выбранном горизонте.
-2. **Inventory** — что уже есть дома.
-3. **Market** — что реально доступно для покупки.
-4. **Planning** — как удовлетворить потребности с минимальными потерями и в рамках ограничений.
-5. **Learning** — что фактически произошло после плана и что можно вывести из истории использования.
+## Один цикл вместо списка
 
-Поэтому базовая цепочка проекта выглядит не так:
+### 1. Отметьте, что есть дома
+
+Первый запуск не требует описывать весь шкаф или вводить граммы вручную.
+
+Выберите несколько обычных товаров и ближайший понятный вариант:
 
 ```text
-Recipe -> Ingredient -> Shopping List
+Нет · Половина · 1 упаковка · 2 упаковки
 ```
 
-а так:
+UI переводит этот выбор в точную `Quantity`; backend сохраняет обычный authoritative stocktake.
+
+### 2. Составьте покупки
+
+Укажите горизонт и бюджет. При необходимости добавьте то, что нужно обязательно.
+
+Система объединяет:
 
 ```text
-Demand Sources
-      +
-Inventory Snapshot
-      +
-Market Snapshot
-      +
-Planning Policy
-      ↓
-Planning Problem
-      ↓
-Planner
-      ↓
-Procurement Plan
+inventory
++ learned depletion
++ explicit needs
++ current market evidence
++ budget
 ```
 
-## Ключевое разделение
+и строит один `ProcurementPlan`.
 
-В доменной модели намеренно разделяются разные уровни реальности:
+### 3. После магазина подтвердите реальность
+
+План — это рекомендация, не факт покупки.
+
+Домашние запасы меняются только после того, как человек подтверждает, сколько действительно куплено.
+
+### 4. Следующий план становится лучше
+
+Последующие stocktakes позволяют выводить depletion между наблюдениями:
 
 ```text
-Item != SKU != Offer
+было
++ подтверждённые покупки
+- стало
+=
+фактическое выбытие
 ```
 
-Например:
+Эта история используется для будущего replenishment, но не создаёт вторую скрытую модель инвентаря.
 
-```text
-рис
-!=
-конкретная пачка риса 800 г
-!=
-эта пачка в конкретном магазине за 129 KGS в конкретный момент времени
-```
+---
 
-- **Item** — семантическая потребность: рис, молоко, куриное филе.
-- **SKU** — конкретно покупаемый товар и упаковка.
-- **Offer** — предложение конкретного продавца: SKU + цена + доступность + время наблюдения + источник.
+## Попробовать локально
 
-Это разделение является частью архитектуры, а не деталями базы данных.
-
-## Что должен уметь первый настоящий vertical slice
-
-Первый программный milestone не требует AI, PostgreSQL или реальных магазинов.
-
-На фиксированных тестовых данных система должна:
-
-- принять потребности;
-- учесть существующие домашние запасы;
-- рассчитать недостающее количество;
-- сопоставить его с доступными упаковками;
-- корректно округлить покупку до целых упаковок;
-- выбрать допустимый вариант закупки;
-- соблюдать бюджет;
-- посчитать стоимость;
-- показать ожидаемые остатки;
-- объяснить, почему выбран именно этот вариант;
-- явно сообщить, если допустимого плана не существует.
-
-Пример:
-
-```text
-Household:
-    1 человек
-
-Budget:
-    3000 KGS
-
-Inventory:
-    rice: 350 g
-
-Demand:
-    rice: 900 g
-    chicken: 1000 g
-    milk: 1500 ml
-
-Market:
-    Store A:
-        rice 800 g     120 KGS
-        chicken 1 kg   370 KGS
-        milk 1 L        90 KGS
-
-    Store B:
-        rice 1 kg      135 KGS
-        chicken 500 g  180 KGS
-        milk 930 ml     82 KGS
-```
-
-Результатом должен быть не просто `shopping_list`, а полноценный `ProcurementPlan`, содержащий покупки, покрытие потребностей, стоимость, остаток бюджета, ожидаемый surplus и объяснение решения.
-
-## Архитектурные принципы
-
-### 1. Ядро не зависит от инфраструктуры
-
-Доменная модель и planner не должны импортировать:
-
-- FastAPI;
-- SQLAlchemy;
-- PostgreSQL-клиент;
-- конкретные API магазинов;
-- LLM SDK.
-
-HTTP, БД, UI и внешние источники — адаптеры вокруг ядра.
-
-### 2. Одинаковый вход должен давать одинаковый результат
-
-Для фиксированных `HouseholdSnapshot`, `InventorySnapshot`, `MarketSnapshot`, `DemandBundle` и `PlanningPolicy` planner должен быть воспроизводимым.
-
-### 3. Цена — это наблюдение, а не вечное свойство товара
-
-Цена всегда относится к:
-
-- конкретному SKU;
-- конкретному продавцу;
-- конкретному моменту времени;
-- конкретному источнику данных.
-
-### 4. AI не владеет математикой планирования
-
-LLM в будущем может переводить естественный язык в типизированный запрос, например:
-
-```text
-«Недорого на неделю, побольше белка, рыбу не люблю»
-        ↓
-PlanRequest(...)
-```
-
-Но вычисление корзины, проверка бюджета и валидация ограничений остаются детерминированными.
-
-### 5. Невозможный план — нормальный результат
-
-Если бюджет, ассортимент или ограничения несовместимы, система не должна молча нарушать условия. Она должна вернуть явный `infeasible`-результат и объяснить причины.
-
-## Границы первой версии
-
-Первая область — **еда**.
-
-Следующее естественное расширение — расходуемые бытовые товары:
-
-- мыло;
-- зубная паста;
-- стиральный порошок;
-- туалетная бумага;
-- бытовая химия.
-
-У них похожая модель: запас → расход → пополнение.
-
-Одежда, электроника и другие долговечные покупки — отдельный класс задач и не должны искусственно встраиваться в модель регулярного пополнения.
-
-OTC-лекарства также не входят в первый домен: система может когда-нибудь помогать с учётом запасов, но медицинские рекомендации требуют отдельной политики и границ безопасности.
-
-## Текущий статус
-
-**M12 — First-Use Experience & Household Bootstrap реализован.**
-
-M1–M10 уже дают deterministic planner, market evidence, durable plan history и closed-loop household operations. M11 впервые делает этот цикл доступным обычному локальному пользователю без ручной работы с Python/JSON:
-
-```text
-browser
-   ↓
-fixed local web assets
-   ↓
-existing M10 JSON API
-   ├── stocktake
-   ├── actual purchase
-   ├── depletion evidence
-   └── M9 replenishment plan
-```
-
-Web shell не получает новую planning authority. JavaScript отображает server evidence и собирает typed JSON requests; budget arithmetic, depletion inference, market admission и purchase semantics остаются в существующих Python layers.
-
-M11 добавляет read-only browser discovery endpoint:
-
-```text
-GET /catalog
-```
-
-Он публикует только canonical `Item`/`SKU` + package quantity, необходимые UI. Retailer listing keys, seller identity и observations не копируются в frontend catalog.
-
-Local UI после первого usability pass русскоязычный и mobile-first. Основной экран использует человеческую модель вместо backend-терминов:
-
-- `Покупки` — период, бюджет и только обязательные пожелания;
-- `Что дома` — быстрые варианты `Нет / Половина / 1 упаковка / 2 упаковки / Другое`;
-- `История` — прошлые списки, изменения запасов и простое объяснение того, что система уже поняла.
-
-Пользователь не выбирает `ml/g/l/kg` в основном stock-update flow и не видит `stocktake`, `depletion`, `explicit need`, `horizon` или `SKU` как продуктовые понятия. UI переводит упаковочные действия в точные typed `Quantity`, а backend contracts остаются прежними. Система предлагает список, человек только добавляет обязательные пожелания и после магазина подтверждает реальность.
-
-Статические assets раздаются только из фиксированного package-resource allowlist (`/`, `/assets/app.js`, `/assets/styles.css`): arbitrary filesystem path serving отсутствует. HTML получает restrictive same-origin CSP, `nosniff`, `DENY` framing и `no-referrer`.
-
-Runner по умолчанию bind'ится только на loopback (`127.0.0.1`). Web shell дополнительно reject'ит non-loopback/hostile `Host` headers и cross-origin unsafe requests, чтобы local bind не полагался только на сетевой интерфейс. Поскольку M11 ещё не имеет auth, попытка открыть unauthenticated UI на `0.0.0.0`/LAN fail-closed без explicit remote opt-in.
-
-Для локального запуска demo host:
+Никаких Docker, PostgreSQL, Redis или LLM для запуска не требуется.
 
 ```bash
-python -m pip install -e ".[dev,web]"
+git clone https://github.com/MirriMmann/household-supply-planner.git
+cd household-supply-planner
+
+python -m venv .venv
+python -m pip install -e ".[web]"
 python examples/m11_local_web.py --serve
 ```
 
-Затем открыть `http://127.0.0.1:8765/`. Default demo host остаётся полностью offline для CI и разработки.
+Откройте:
 
-После установки M5.1 real catalog pack тот же UI можно запустить с живым Globus market:
+```text
+http://127.0.0.1:8765/
+```
+
+По умолчанию это полностью offline demo: интерфейс, planner, household history и persistence настоящие; market fixture детерминированный.
+
+### С живым Globus Online
 
 ```bash
 python examples/m11_local_web.py --serve --live-globus
 ```
 
-Live composition использует полный canonical M5.1 catalog для browser discovery, но перед внешним acquisition выбирает только exact retailer listings для `Item`, реально присутствующих в текущем planning request. Поэтому запрос на молоко не сканирует весь catalog. Selection идёт через existing `CatalogBinding`, а не по названиям. Offline и live profiles используют разные default data directories, чтобы demo household history не смешивалась с real-catalog identity.
+Live composition использует реальный packaged-staples catalog Globus Online.  
+Перед сетевым acquisition выбираются только retailer listings для товаров, которые действительно нужны текущему запросу — полный каталог не сканируется на каждый plan.
 
-M12 добавляет первый запуск без README: пользователь выбирает несколько обычных домашних товаров, для каждого явно отмечает `Нет` / `Половина` / `1 упаковка` / `2 упаковки`, после чего браузер записывает обычные M10 `InventoryCorrection` через существующий stocktake API. Товары, которые обычно бывают дома, но отмечены как `Нет`, только предварительно попадают в «Нужно обязательно» и остаются редактируемыми до расчёта. Следующий шаг — первый внешний usability pilot без подсказок; Natural Language остаётся downstream adapter после этого evidence gate.
+> Live market mode зависит от доступности и текущей структуры публичного retailer surface. CI остаётся полностью offline.
 
-Подробнее:
+---
 
-- [Архитектура](docs/ARCHITECTURE.md)
+## Почему результату можно доверять
+
+### Детерминированный planner
+
+Одинаковые typed inputs дают одинаковый planning result. Budget arithmetic, package rounding и hard constraints не делегируются генеративной модели.
+
+### Evidence вместо догадок
+
+`Item`, `SKU`, `Offer` и `MarketObservation` — разные сущности.
+
+```text
+молоко
+!=
+конкретная упаковка 1 л
+!=
+предложение магазина по конкретной цене в конкретный момент
+```
+
+Catalog resolution использует exact identity/bindings. Fuzzy product matching не становится источником market truth.
+
+### Recommendation ≠ reality
+
+```text
+ProcurementPlan != PurchaseEvent
+```
+
+Сохранённый план не изменяет household state. Только подтверждённая фактическая покупка становится событием истории.
+
+### Learning без скрытой магии
+
+Система учится по наблюдаемым stocktakes и подтверждённым покупкам.  
+Если данные противоречат друг другу или появляется необъяснимый inflow, модель не выдумывает расход.
+
+---
+
+## Что уже работает
+
+**M12 — First-Use Experience & Household Bootstrap**
+
+Текущий vertical slice включает:
+
+- deterministic package-aware procurement planner;
+- budget constraints и infeasible results;
+- multi-objective planning;
+- canonical `Item` / `SKU` / market evidence model;
+- real Globus Online provider и packaged-staples catalog;
+- request-scoped live market acquisition;
+- durable plan history;
+- append-only household event history;
+- stocktakes и purchase confirmations;
+- depletion learning;
+- recurring replenishment;
+- Russian-first mobile-friendly local web UI;
+- first-use onboarding без знания backend terminology.
+
+CI проверяет Python 3.11 и 3.13, offline examples и compileability.
+
+---
+
+## Что пока намеренно ограничено
+
+Проект уже имеет рабочий vertical slice, но ещё не позиционируется как законченный массовый consumer service.
+
+Сейчас:
+
+- основной domain — packaged food / household staples;
+- live retailer integration — Globus Online;
+- UI работает локально и по умолчанию bind'ится только на loopback;
+- remote mode не имеет полноценной authentication model;
+- natural-language interface ещё не является authority layer;
+- multi-user/cloud sync и mobile native app не входят в текущий slice.
+
+Следующий evidence gate — **внешний usability pilot без подсказок**.  
+Natural Language Interface начинается только после того, как базовый workflow понятен человеку сам по себе.
+
+---
+
+## Архитектура в одном экране
+
+```text
+Browser UI
+    ↓ typed commands
+Household operations
+    ↓
+Demand compilation
+    ↓
+request-scoped market acquisition
+    ↓
+market evidence admission
+    ↓
+deterministic planner
+    ↓
+durable plan record
+    ↓
+human purchase confirmation
+    ↓
+household history
+    ↓
+depletion learning
+    └────────────→ next replenishment
+```
+
+Ключевая граница:
+
+```text
+AI / UI may interpret intent
+        ↓
+typed request
+        ↓
+validation
+        ↓
+deterministic planning authority
+```
+
+Ни UI, ни будущий LLM не владеют ценой, бюджетной корректностью, market truth или фактом покупки.
+
+Подробности:
+
+- [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 
-## Текущая исполнимая гарантия
+---
 
-> Русскоязычный local browser client может без знания backend-терминов отметить примерные остатки, получить список покупок, скорректировать обязательные товары и подтвердить фактическую покупку; exact quantities, planning и learning authority остаются в существующих backend layers.
+## Для разработчиков
 
-Проверка из активированного виртуального окружения:
+Установить dev-зависимости и запустить весь offline suite:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,web]"
 python -m pytest
-python examples/m1_week_one.py
-python examples/m2_meal_demand.py
-python examples/m3_multi_objective.py
-python examples/m4_market_acquisition.py
-python examples/m5_globus_provider.py
-python examples/m6_application_service.py
-python examples/m7_plan_persistence.py
-python examples/m8_household_learning.py
-python examples/m9_household_replenishment.py
-python examples/m10_closed_loop_household.py
-python examples/m11_local_web.py
+python -m compileall -q src examples tests
 ```
 
-Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
+Основные слои:
 
-```bash
-python examples/m5_globus_live.py
-python examples/m6_globus_live.py
+```text
+src/household_supply/
+├── domain/       # Item, SKU, quantities, planning primitives
+├── demand/       # demand sources and compilation
+├── market/       # observations, catalog resolution, providers
+├── planning/     # deterministic procurement optimization
+├── household/    # event history, projection, depletion learning
+├── application/  # orchestration, lifecycle, persistence
+└── web/          # local browser surface
 ```
 
-CI остаётся полностью offline. M11 добавляет packaged HTML/CSS/vanilla JS и optional `uvicorn` runtime extra, но по-прежнему не требует PostgreSQL, Redis, Docker orchestration, auth или LLM.
+Архитектурный принцип проекта — **core first, infrastructure second**.  
+Domain/planning code не зависит от FastAPI, SQLAlchemy, PostgreSQL, retailer SDK или LLM SDK.
+
+---
+
+## Статус проекта
+
+`Household Supply Planner` — рабочее техническое название; продуктовый бренд будет выбран позже.
+
+Репозиторий развивается milestone-by-milestone с явными invariants и regression tests.  
+Текущая цель — доказать удобный closed-loop household workflow прежде, чем добавлять более широкий AI/interface layer.

@@ -830,11 +830,31 @@ M9 читает `HouseholdHistory` один раз и выводит `HouseholdS
 
 Persisted `PlanRecord` остаётся recommendation/history of decision. Только отдельный подтверждённый `PurchaseEvent` меняет household facts.
 
+### I35. Derived depletion != inventory mutation
+
+Stocktake-derived depletion является только learning evidence. Оно не сохраняется как второй household event и не применяется к inventory projection после absolute `InventoryCorrection`.
+
+### I36. Historical plan attribution не отменяет current SKU identity validation
+
+Plan-linked purchase confirmation проверяет historical `sku_id` вместе с Item/package quantity basis. Если current catalog переиспользовал identity с несовместимой package semantics, mutation fail closed.
+
+### I37. Browser client != domain authority
+
+M11 JavaScript не пересчитывает depletion, demand, package optimization, budget validity или market identity. Он отправляет typed JSON commands и отображает server evidence.
+
+### I38. Browser catalog != market evidence
+
+`GET /catalog` публикует canonical Item/SKU/package data для выбора пользователем, но не retailer listing bindings и не current observations. Market truth остаётся M4/M5 concern.
+
+### I39. Unauthenticated local web exposure is loopback by default
+
+До появления auth M11 runner не bind'ится на non-loopback host без explicit opt-in. Удобство local UI не должно случайно превращать household API в LAN service.
+
 ---
 
 ## 5. Модули
 
-Актуальная логическая структура после M9:
+Актуальная логическая структура после M11:
 
 ```text
 src/household_supply/
@@ -876,19 +896,30 @@ src/household_supply/
 │   ├── history.py       # immutable fact collection
 │   ├── projection.py    # facts -> HouseholdState / InventorySnapshot
 │   ├── learning.py      # exact evidence -> transparent estimate
+│   ├── depletion.py     # M10 stocktake windows -> derived evidence
 │   ├── recurring.py     # estimate -> M2 DemandSource
 │   ├── persistence.py   # append-only event repository adapters
 │   └── service.py       # thin household orchestration boundary
 │
-└── application/
-    ├── models.py        # typed request/result + catalog preflight
-    ├── service.py       # M6 orchestration boundary
-    ├── json_api.py      # strict compute-only JSON contract
-    ├── lifecycle.py     # M7 durable plan lifecycle
-    ├── lifecycle_api.py # M7 history HTTP semantics
-    ├── persistence.py   # M7 PlanRepository adapters
-    ├── cli.py           # injected CLI adapter
-    └── asgi.py          # dependency-free bounded HTTP adapter
+├── application/
+│   ├── models.py                  # typed request/result + catalog preflight
+│   ├── service.py                 # M6 orchestration boundary
+│   ├── json_api.py                # strict compute-only JSON contract
+│   ├── lifecycle.py               # M7 durable plan lifecycle
+│   ├── lifecycle_api.py           # M7 history HTTP semantics
+│   ├── persistence.py             # M7 PlanRepository adapters
+│   ├── replenishment.py           # M9 household -> planner composition
+│   ├── replenishment_api.py       # M9 planning JSON surface
+│   ├── household_operations.py    # M10 stocktake/purchase commands
+│   ├── household_operations_api.py# M10 closed-loop JSON surface
+│   ├── cli.py                     # injected CLI adapter
+│   └── asgi.py                    # dependency-free bounded HTTP adapter
+│
+└── web/
+    ├── api.py            # M11 canonical catalog discovery
+    ├── app.py            # fixed static routes + API delegation
+    ├── server.py         # loopback-first optional uvicorn runner
+    └── assets/           # packaged semantic HTML/CSS/vanilla JS
 ```
 
 M5 сохраняет одностороннюю зависимость:
@@ -1506,12 +1537,76 @@ Generic `PlanAsgiApp` получает opt-in `accepts_json_body()` policy вм�
 
 ---
 
-## 13. Что намеренно не входит в domain/planning core
+## 13. Local Web MVP (M11)
 
-Даже после M10 domain/planning core не включает:
+M11 — внешний human-facing client существующего M10 application surface, а не новый domain layer.
+
+```text
+Browser
+  ↓
+HouseholdLocalWebApp
+  ├── GET /, /assets/app.js, /assets/styles.css
+  └── delegate
+          ↓
+       PlanAsgiApp
+          ↓
+   HouseholdWebJsonApi
+      ├── GET /catalog
+      └── HouseholdClosedLoopJsonApi
+```
+
+### 13.1 Catalog discovery != market authority
+
+`GET /catalog` сериализует canonical UI data:
+
+```text
+Item id / name / category / aliases
+SKU id / item id / name / brand / package quantity
+```
+
+Он намеренно не публикует `CatalogBinding`, `ExternalListingKey`, seller ids или current observations. Browser выбирает известный Item/SKU, но не решает, какая external listing соответствует SKU и не утверждает current price.
+
+### 13.2 Static serving boundary
+
+Web app раздаёт только фиксированный allowlist package resources. Request path никогда не преобразуется в filesystem path, поэтому `../`/absolute-path traversal не является supported code path.
+
+`index.html` использует external same-origin JS/CSS и restrictive CSP. No inline script/style authority необходима.
+
+### 13.3 Browser remains non-authoritative
+
+JavaScript формирует JSON commands и отображает backend results. Все критичные операции проходят существующие application routes:
+
+```text
+POST /household/stocktakes
+POST /household/purchases
+POST /plans
+POST /plans/{plan_id}/purchases
+```
+
+Plan explanation строится из persisted request/result + fresh M9 preparation evidence, а не из отдельного JS planner.
+
+### 13.4 Local exposure policy
+
+M11 не вводит authentication. Generic `serve_local_web()` поэтому по умолчанию разрешает только loopback host. `HouseholdLocalWebApp` отдельно валидирует loopback `Host` и same-origin unsafe `Origin`, чтобы защититься от DNS rebinding/cross-origin mutation даже при локальном сокете. Non-loopback serving требует explicit opt-in и на app/server boundary.
+
+### 13.5 Runtime packaging
+
+HTML/CSS/JS входят в wheel package data. ASGI server dependency остаётся optional extra `household-supply-planner[web]`; импорт planning/core package не требует uvicorn.
+
+### 13.6 Human presentation boundary
+
+M11 presentation intentionally does not expose backend vocabulary as the user's mental model. Russian is the first presentation locale, while domain identifiers and quantities remain locale-independent. The primary stock flow operates in package-relative choices (`Нет`, `Половина`, `1 упаковка`, `2 упаковки`) and converts those choices to the exact SKU package quantity before sending the existing M10 command. An exact amount is progressive disclosure and its unit is derived from the package rather than chosen independently by the user.
+
+The purchase screen follows `system proposes, human corrects`: household state and learned depletion produce the recommendation; the person may add mandatory products and later confirm actual package counts. JavaScript may format units/currency for readability but does not become arithmetic or planning authority.
+
+---
+
+## 14. Что намеренно не входит в domain/planning core
+
+Даже после M11 domain/planning core не включает:
 
 - HTTP/ASGI transport semantics;
-- UI;
+- UI semantics внутри planner/domain core;
 - авторизация;
 - аккаунты;
 - PostgreSQL;

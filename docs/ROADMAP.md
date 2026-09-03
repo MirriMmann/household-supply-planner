@@ -692,28 +692,64 @@ Generic ASGI adapter получил opt-in body policy для новых POST ro
 
 ## M11 — Local Web MVP
 
-Цель: впервые дать человеку пользоваться closed-loop системой несколько дней без Python/JSON вручную.
+**Статус: реализован.**
 
-Минимальный UI:
+Цель: впервые дать человеку пользоваться closed-loop системой без Python/JSON вручную, не перенося domain authority во frontend.
+
+Архитектура:
 
 ```text
-Home / current stock
-Stocktake
-Plan replenishment
-Plan explanation
-Purchase confirmation
-History / depletion evidence
+semantic HTML / CSS / vanilla JS
+              ↓ same origin
+HouseholdLocalWebApp
+              ├── fixed packaged assets
+              └── PlanAsgiApp
+                       ↓
+              HouseholdWebJsonApi
+                       ├── GET /catalog
+                       └── existing M10 API
 ```
 
-Предпочтительный первый frontend:
+Добавлено:
 
-- semantic HTML;
-- CSS;
-- небольшой vanilla JS;
-- existing ASGI/JSON backend;
-- один лёгкий ASGI server dependency только на runtime boundary.
+- fixed packaged `index.html`, `styles.css`, `app.js`;
+- read-only canonical `GET /catalog`;
+- Russian-first mobile-first product shell;
+- three human-facing sections: `Покупки`, `Что дома`, `История`;
+- package-relative household updates without a primary unit selector;
+- optional exact amount as progressive disclosure;
+- budget + 3/7/14-day purchase period presets;
+- visual mandatory-product picker instead of `explicit need` rows;
+- persisted purchase recommendation + human coverage explanation;
+- actual plan-linked purchase confirmation with package stepper;
+- manual packaged purchase as a secondary disclosed action;
+- recent plans/facts and simplified learning summary;
+- durable offline demo host;
+- optional `web` extra with `uvicorn`;
+- loopback-only serving by default.
 
-React/Next.js/database/auth не нужны до доказанного usability requirement.
+UI JavaScript не реализует:
+
+- depletion arithmetic;
+- demand compilation;
+- package optimization;
+- budget correctness;
+- market identity resolution;
+- plan → purchase mutation без explicit human confirmation.
+
+Browser catalog endpoint намеренно не экспортирует retailer listing/binding/observation identities: frontend получает canonical Items/SKUs, а market truth остаётся внутри existing backend evidence path.
+
+Static serving использует фиксированный route allowlist, а не filesystem path mapping. HTML получает same-origin CSP и basic anti-content-sniff/frame/referrer headers.
+
+M11 server не имеет auth, поэтому default host — loopback. Web shell также проверяет `Host`/unsafe `Origin` как defense-in-depth против DNS rebinding/cross-origin mutation. Non-loopback serving требует explicit opt-in.
+
+### UX contract
+
+Основные пользовательские экраны не используют `stocktake`, `depletion`, `explicit need`, `horizon`, `SKU` или отдельный unit selector. Русский язык — presentation default; domain IDs/units остаются locale-independent. Внутри сохраняются exact quantities, снаружи основной flow работает упаковками и понятными словами. На каждом разделе есть одна очевидная задача: составить покупки, обновить домашние запасы или посмотреть историю.
+
+### Definition of Done
+
+> Человек без знания терминов проекта может открыть local browser UI, примерно отметить запасы, получить список покупок, добавить обязательный продукт и подтвердить фактическую покупку; browser остаётся client existing M9/M10 contracts, static shell не читает arbitrary files и unauthenticated server не открывается в LAN случайно.
 
 ---
 

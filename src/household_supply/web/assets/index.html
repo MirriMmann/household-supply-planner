@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Домашние покупки</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">✓</div>
+      <div>
+        <strong class="brand-name">Домашние покупки</strong>
+        <span class="brand-subtitle">Помогаем не забыть нужное</span>
+      </div>
+    </div>
+    <div class="connection" id="connection-status" aria-live="polite">
+      <span class="status-dot"></span>
+      <span>Подключаемся…</span>
+    </div>
+  </header>
+
+  <nav class="main-nav" aria-label="Основные разделы">
+    <button class="nav-button active" type="button" data-view="shopping">
+      <span class="nav-icon" aria-hidden="true">🛒</span>
+      <span>Покупки</span>
+    </button>
+    <button class="nav-button" type="button" data-view="home">
+      <span class="nav-icon" aria-hidden="true">🏠</span>
+      <span>Что дома</span>
+    </button>
+    <button class="nav-button" type="button" data-view="history">
+      <span class="nav-icon" aria-hidden="true">🕘</span>
+      <span>История</span>
+    </button>
+  </nav>
+
+  <main class="page-shell">
+    <section class="view active" id="view-shopping" data-view-panel="shopping" aria-labelledby="shopping-title">
+      <div class="welcome-card hidden" id="first-run-card">
+        <div class="welcome-icon" aria-hidden="true">🏠</div>
+        <div class="welcome-copy">
+          <strong>Сначала покажите, что уже есть дома</strong>
+          <p>Достаточно примерно отметить остатки. Потом список покупок будет составляться почти сам.</p>
+        </div>
+        <button class="secondary-button" id="start-home-setup" type="button">Отметить запасы</button>
+      </div>
+
+      <section class="primary-card planner-card">
+        <div class="section-heading">
+          <span class="section-kicker">НА ЭТУ ПОКУПКУ</span>
+          <h1 id="shopping-title">Составить покупки</h1>
+          <p>Мы учтём то, что уже есть дома, и то, что обычно заканчивается.</p>
+        </div>
+
+        <form id="plan-form" class="planner-form">
+          <fieldset class="field-group">
+            <legend>На сколько дней закупаемся?</legend>
+            <div class="choice-row" id="horizon-choices">
+              <button type="button" class="choice-chip" data-days="3">3 дня</button>
+              <button type="button" class="choice-chip selected" data-days="7">7 дней</button>
+              <button type="button" class="choice-chip" data-days="14">14 дней</button>
+            </div>
+            <input id="plan-horizon" type="hidden" value="7">
+          </fieldset>
+
+          <label class="large-field" for="plan-budget">
+            <span>Сколько готовы потратить?</span>
+            <span class="input-with-suffix">
+              <input id="plan-budget" inputmode="decimal" autocomplete="off" value="3000" required>
+              <strong>сом</strong>
+            </span>
+          </label>
+          <input id="plan-currency" type="hidden" value="KGS">
+
+          <div class="must-have-block">
+            <div class="subheading-row">
+              <div>
+                <strong>Нужно что-то обязательно?</strong>
+                <span>Необязательно. Добавьте только то, без чего точно не хотите остаться.</span>
+              </div>
+            </div>
+
+            <label class="search-field" for="product-search">
+              <span class="visually-hidden">Найти продукт</span>
+              <span aria-hidden="true">🔎</span>
+              <input id="product-search" type="search" autocomplete="off" placeholder="Найти продукт">
+            </label>
+            <div id="product-picker" class="product-picker" aria-live="polite"></div>
+            <div id="must-have-list" class="selected-needs"></div>
+          </div>
+
+          <button class="primary-button main-action" id="build-plan-button" type="submit">
+            Составить покупки
+          </button>
+        </form>
+      </section>
+
+      <section class="primary-card result-card hidden" id="plan-result-panel" aria-labelledby="plan-result-title">
+        <div class="result-heading">
+          <div>
+            <span class="section-kicker">ГОТОВО</span>
+            <h2 id="plan-result-title">Вот что стоит купить</h2>
+          </div>
+          <span id="plan-status" class="status-pill"></span>
+        </div>
+
+        <div class="plan-summary" id="plan-summary"></div>
+        <div id="purchase-list" class="purchase-list"></div>
+
+        <details class="explanation-details">
+          <summary>Почему именно столько?</summary>
+          <div id="explanation-list" class="explanation-list"></div>
+        </details>
+
+        <p class="human-note">Запасы дома изменятся только после того, как вы отметите, что действительно купили.</p>
+      </section>
+    </section>
+
+    <section class="view" id="view-home" data-view-panel="home" aria-labelledby="home-title">
+      <div class="section-heading page-heading">
+        <span class="section-kicker">ВАШ ДОМ</span>
+        <h1 id="home-title">Что есть дома</h1>
+        <p>Не нужно считать идеально. Выберите ближайший вариант — этого достаточно, чтобы начать.</p>
+      </div>
+
+      <div id="home-items" class="home-items"></div>
+
+      <details class="secondary-operation">
+        <summary>Купили что-то без списка?</summary>
+        <form id="manual-purchase-form" class="manual-purchase-form">
+          <label>
+            <span>Что купили</span>
+            <select id="manual-purchase-sku" required></select>
+          </label>
+          <label>
+            <span>Сколько упаковок</span>
+            <span class="stepper-field">
+              <button type="button" class="stepper-button" data-step-target="manual-purchase-packs" data-step="-1" aria-label="Уменьшить">−</button>
+              <input id="manual-purchase-packs" type="number" min="1" max="100000" step="1" value="1" required>
+              <button type="button" class="stepper-button" data-step-target="manual-purchase-packs" data-step="1" aria-label="Увеличить">+</button>
+            </span>
+          </label>
+          <button class="secondary-button" type="submit">Добавить покупку</button>
+        </form>
+      </details>
+    </section>
+
+    <section class="view" id="view-history" data-view-panel="history" aria-labelledby="history-title">
+      <div class="section-heading page-heading">
+        <span class="section-kicker">ИСТОРИЯ</span>
+        <h1 id="history-title">Что менялось</h1>
+        <p>Здесь можно посмотреть прошлые списки и последние изменения запасов.</p>
+      </div>
+
+      <div class="history-grid">
+        <section class="primary-card">
+          <div class="simple-heading">
+            <h2>Прошлые покупки</h2>
+          </div>
+          <div id="recent-plans" class="stack-list"></div>
+        </section>
+
+        <section class="primary-card">
+          <div class="simple-heading">
+            <h2>Последние изменения дома</h2>
+          </div>
+          <div id="activity-list" class="activity-list"></div>
+        </section>
+
+        <section class="primary-card history-learning-card">
+          <div class="simple-heading">
+            <h2>Что система уже поняла</h2>
+            <p>Чем больше обычных обновлений остатков, тем точнее следующие покупки.</p>
+          </div>
+          <div id="learning-list" class="stack-list"></div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

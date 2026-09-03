@@ -325,3 +325,42 @@ def test_local_web_refuses_remote_binding_by_default() -> None:
         serve_local_web(object(), host="0.0.0.0")
     with pytest.raises(ValueError, match="port"):
         serve_local_web(object(), port=0)
+
+
+
+def test_first_use_bootstrap_contract() -> None:
+    app = make_web_app()
+    start, body = asyncio.run(asgi_request(app, method="GET", path="/"))
+    assert start["status"] == 200
+    html = body["body"].decode("utf-8")
+    assert 'id="onboarding-layer"' in html
+    assert 'aria-modal="true"' in html
+    assert "Пропустить пока" in html
+    assert "<script>" not in html
+
+    js_start, js_body = asyncio.run(asgi_request(app, method="GET", path="/assets/app.js"))
+    assert js_start["status"] == 200
+    javascript = js_body["body"].decode("utf-8")
+    assert "Что у вас обычно бывает дома?" in javascript
+    assert "Сколько сейчас есть?" in javascript
+    assert 'reason: "first-use bootstrap"' in javascript
+    assert 'request("/household/stocktakes"' in javascript
+    assert "scaleDecimalText" in javascript
+    assert "state.mustHaves.set" in javascript
+    assert "Половина" in javascript
+    assert "2 упаковки" in javascript
+    assert "Немного" not in javascript
+    assert "Много" not in javascript
+    assert 'sessionStorage.setItem(FIRST_USE_DISMISSED_KEY, "1")' in javascript
+
+
+def test_first_use_bootstrap_does_not_add_backend_authority() -> None:
+    app = make_web_app()
+    css_start, css_body = asyncio.run(asgi_request(app, method="GET", path="/assets/styles.css"))
+    assert css_start["status"] == 200
+    assert b"onboarding-layer" in css_body["body"]
+
+    # M12 reuses existing M10 commands. There is deliberately no onboarding API.
+    start, body = asyncio.run(asgi_request(app, method="POST", path="/onboarding", body=b"{}", content_type=b"application/json"))
+    assert start["status"] == 404
+    assert json.loads(body["body"])["error"] == "not_found"

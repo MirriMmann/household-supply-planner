@@ -200,7 +200,7 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M11.2 — Local Web MVP + request-scoped live Globus integration реализован.**
+**M12 — First-Use Experience & Household Bootstrap реализован.**
 
 M1–M10 уже дают deterministic planner, market evidence, durable plan history и closed-loop household operations. M11 впервые делает этот цикл доступным обычному локальному пользователю без ручной работы с Python/JSON:
 
@@ -255,7 +255,7 @@ python examples/m11_local_web.py --serve --live-globus
 
 Live composition использует полный canonical M5.1 catalog для browser discovery, но перед внешним acquisition выбирает только exact retailer listings для `Item`, реально присутствующих в текущем planning request. Поэтому запрос на молоко не сканирует весь catalog. Selection идёт через existing `CatalogBinding`, а не по названиям. Offline и live profiles используют разные default data directories, чтобы demo household history не смешивалась с real-catalog identity.
 
-Следующий milestone — **M12 First-Use Experience & Household Bootstrap**: новый пользователь должен начать работу без ручного изучения терминов и без заполнения полного инвентаря. Natural Language остаётся downstream adapter после первого реального usability pilot.
+M12 добавляет первый запуск без README: пользователь выбирает несколько обычных домашних товаров, для каждого явно отмечает `Нет` / `Половина` / `1 упаковка` / `2 упаковки`, после чего браузер записывает обычные M10 `InventoryCorrection` через существующий stocktake API. Товары, которые обычно бывают дома, но отмечены как `Нет`, только предварительно попадают в «Нужно обязательно» и остаются редактируемыми до расчёта. Следующий шаг — первый внешний usability pilot без подсказок; Natural Language остаётся downstream adapter после этого evidence gate.
 
 Подробнее:
 

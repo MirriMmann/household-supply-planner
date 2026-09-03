@@ -792,9 +792,39 @@ Definition of Done:
 
 ## M12 — First-Use Experience & Household Bootstrap
 
-Первый запуск должен позволять человеку начать пользоваться системой без README и без ручного описания всего дома. Основные задачи: быстрый выбор обычных домашних товаров, приблизительный initial stock через человеческие package-relative варианты и переход прямо к первому списку покупок.
+**Статус: реализован.**
 
-После этого проводится первый внешний usability pilot без подсказок. Natural Language Interface переносится на следующий milestone и остаётся typed adapter над deterministic workflow.
+Первый запуск позволяет начать без README и без ручного описания всего дома:
+
+```text
+Добро пожаловать
+    ↓
+выбрать обычные домашние товары
+    ↓
+для каждого: Нет / Половина / 1 упаковка / 2 упаковки
+    ↓
+existing POST /household/stocktakes
+    ↓
+готовый household state
+    ↓
+товары со статусом «Нет» предварительно в editable must-have list
+```
+
+Инварианты:
+
+- onboarding не вводит новый backend/domain authority;
+- каждое сохранённое значение выражается exact package fraction через существующую `Quantity`;
+- fuzzy labels `немного`, `много`, `2+` запрещены для authoritative bootstrap;
+- запись идёт через существующие idempotent stocktake commands;
+- `Нет` для выбранного обычного товара может только предложить одну упаковку как editable explicit need;
+- никакой `PurchaseEvent` не создаётся до реального подтверждения покупки;
+- skip хранится только на время browser session, а household history остаётся source of truth для completed onboarding.
+
+Definition of Done:
+
+> Новый пользователь может за несколько коротких экранов выбрать привычные товары, явно отметить текущие остатки и перейти к первому списку покупок без знания backend terminology и без появления новой planning/household authority.
+
+Следующий gate — первый внешний usability pilot без подсказок: 3 core tasks, target >=90% completion, фиксируем время до первого успешного плана, вопросы, misclicks и непонятные слова. Natural Language Interface начинается только после этого evidence gate.
 
 ---
 

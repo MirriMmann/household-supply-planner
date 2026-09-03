@@ -1617,6 +1617,24 @@ Scoped layer владеет только acquisition scope. Он не измен
 
 Default M11 composition остаётся offline. `--live-globus` является explicit external-network mode и использует отдельный default data profile, чтобы fixture identities не смешивались с real-catalog household history.
 
+### 13.2 First-use household bootstrap (M12)
+
+M12 не добавляет новый household event type и не создаёт отдельный onboarding backend. Browser first-use flow собирает только явные package-relative значения (`0`, `1/2`, `1`, `2` упаковки) и отправляет существующие `POST /household/stocktakes`. Поэтому authoritative state по-прежнему строится только из M8/M10 history.
+
+```text
+first-use product selection
+        ↓
+explicit package-relative stock choices
+        ↓
+existing stocktake commands
+        ↓
+InventoryCorrection history
+        ↓
+existing household projection
+```
+
+Fuzzy labels (`немного`, `много`, `2+`) намеренно не используются: browser не имеет права превращать неопределённое наблюдение в точное количество. Если пользователь выбрал товар как обычный для дома и явно отметил `Нет`, UI может предварительно добавить одну упаковку в editable `mustHaves`; это candidate input к M9, а не PurchaseEvent и не скрытое решение planner. Пропуск onboarding сохраняется только в `sessionStorage`, поэтому очистка server-side household history не маскируется постоянным browser flag.
+
 The purchase screen follows `system proposes, human corrects`: household state and learned depletion produce the recommendation; the person may add mandatory products and later confirm actual package counts. JavaScript may format units/currency for readability but does not become arithmetic or planning authority.
 
 ---

@@ -889,3 +889,370 @@ byId("plan-form").addEventListener("submit", async (event) => {
 });
 
 refreshAll();
+
+
+// M12 first-use bootstrap. This layer only orchestrates existing M10 stocktake
+// commands. Package-relative choices are explicit quantities; fuzzy labels such
+// as "немного" or "много" never become authoritative household facts.
+(() => {
+  const FIRST_USE_DISMISSED_KEY = "hsp:first-use-dismissed";
+  const COMMON_ITEM_ORDER = [
+    "milk",
+    "eggs",
+    "bread",
+    "pasta",
+    "sunflower_oil",
+    "rice",
+    "sugar",
+    "semolina",
+    "canned_peas",
+    "canned_fish",
+    "seasoning",
+    "oil",
+  ];
+
+  const onboarding = {
+    step: "welcome",
+    selected: new Set(),
+    quantities: new Map(),
+    saving: false,
+    missingItemIds: [],
+  };
+
+  const layer = byId("onboarding-layer");
+  const content = byId("onboarding-content");
+  const actions = byId("onboarding-actions");
+  const progress = byId("onboarding-progress");
+  const skip = byId("onboarding-skip");
+  const firstRunCard = byId("first-run-card");
+
+  function button(label, className = "secondary-button") {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = className;
+    node.textContent = label;
+    return node;
+  }
+
+  function paragraph(text, className = "") {
+    const node = document.createElement("p");
+    node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+
+  function title(text) {
+    const node = document.createElement("h2");
+    node.id = "onboarding-title";
+    node.textContent = text;
+    return node;
+  }
+
+  function availableItems() {
+    const rank = new Map(COMMON_ITEM_ORDER.map((itemId, index) => [itemId, index]));
+    return [...state.catalog.items]
+      .filter((item) => primarySku(item.item_id))
+      .sort((left, right) => {
+        const leftRank = rank.get(left.item_id) ?? 10_000;
+        const rightRank = rank.get(right.item_id) ?? 10_000;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+        return left.name.localeCompare(right.name, "ru");
+      })
+      .slice(0, 10);
+  }
+
+  function setProgress(label) {
+    progress.textContent = label;
+  }
+
+  function clearSurface() {
+    content.replaceChildren();
+    actions.replaceChildren();
+  }
+
+  function openOnboarding() {
+    if (sessionStorage.getItem(FIRST_USE_DISMISSED_KEY) === "1") return;
+    if (!state.catalog.items.length || state.history.length > 0) return;
+    layer.classList.remove("hidden");
+    layer.setAttribute("aria-hidden", "false");
+    document.body.classList.add("onboarding-open");
+    renderOnboarding();
+  }
+
+  function closeOnboarding() {
+    layer.classList.add("hidden");
+    layer.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("onboarding-open");
+  }
+
+  function dismissOnboarding() {
+    sessionStorage.setItem(FIRST_USE_DISMISSED_KEY, "1");
+    closeOnboarding();
+  }
+
+  function renderWelcome() {
+    setProgress("Шаг 1 из 3");
+    const icon = document.createElement("div");
+    icon.className = "onboarding-hero-icon";
+    icon.textContent = "🏠";
+    content.append(
+      icon,
+      title("Добро пожаловать"),
+      paragraph("Отметьте несколько обычных продуктов и сколько их сейчас дома. Этого достаточно, чтобы начать."),
+    );
+
+    const note = document.createElement("div");
+    note.className = "onboarding-note";
+    note.textContent = "Не нужно описывать весь дом и не нужно считать идеально до грамма. Вы будете выбирать понятные доли упаковки.";
+    content.appendChild(note);
+
+    const start = button("Начать", "primary-button onboarding-primary");
+    start.addEventListener("click", () => {
+      onboarding.step = "products";
+      renderOnboarding();
+    });
+    actions.appendChild(start);
+  }
+
+  function renderProducts() {
+    setProgress("Шаг 2 из 3");
+    content.append(
+      title("Что у вас обычно бывает дома?"),
+      paragraph("Выберите только знакомые вам продукты. Потом список можно менять в любой момент."),
+    );
+
+    const grid = document.createElement("div");
+    grid.className = "onboarding-product-grid";
+    for (const item of availableItems()) {
+      const sku = primarySku(item.item_id);
+      const option = button("", "onboarding-product");
+      option.classList.toggle("selected", onboarding.selected.has(item.item_id));
+      option.setAttribute("aria-pressed", onboarding.selected.has(item.item_id) ? "true" : "false");
+
+      const emoji = document.createElement("span");
+      emoji.className = "onboarding-product-emoji";
+      emoji.textContent = itemEmoji(item.item_id);
+      const copy = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const pack = document.createElement("small");
+      pack.textContent = `Упаковка: ${humanQuantity(sku.package_quantity)}`;
+      copy.append(name, pack);
+      const mark = document.createElement("span");
+      mark.className = "onboarding-check";
+      mark.textContent = onboarding.selected.has(item.item_id) ? "✓" : "+";
+      option.append(emoji, copy, mark);
+      option.addEventListener("click", () => {
+        if (onboarding.selected.has(item.item_id)) {
+          onboarding.selected.delete(item.item_id);
+          onboarding.quantities.delete(item.item_id);
+        } else {
+          onboarding.selected.add(item.item_id);
+        }
+        renderOnboarding();
+      });
+      grid.appendChild(option);
+    }
+    content.appendChild(grid);
+
+    const counter = paragraph(
+      onboarding.selected.size
+        ? `Выбрано: ${onboarding.selected.size}`
+        : "Выберите хотя бы один продукт.",
+      "onboarding-counter",
+    );
+    content.appendChild(counter);
+
+    const back = button("Назад");
+    back.addEventListener("click", () => {
+      onboarding.step = "welcome";
+      renderOnboarding();
+    });
+    const next = button("Дальше", "primary-button onboarding-primary");
+    next.disabled = onboarding.selected.size === 0;
+    next.addEventListener("click", () => {
+      onboarding.step = "stock";
+      renderOnboarding();
+    });
+    actions.append(back, next);
+  }
+
+  function stockPresets() {
+    return [
+      ["Нет", 0, 1],
+      ["Половина", 1, 2],
+      ["1 упаковка", 1, 1],
+      ["2 упаковки", 2, 1],
+    ];
+  }
+
+  function renderStock() {
+    setProgress("Шаг 3 из 3");
+    content.append(
+      title("Сколько сейчас есть?"),
+      paragraph("Выберите ближайший вариант для каждого продукта. Мы сохраним именно выбранную долю упаковки."),
+    );
+
+    const list = document.createElement("div");
+    list.className = "onboarding-stock-list";
+    for (const itemId of onboarding.selected) {
+      const sku = primarySku(itemId);
+      if (!sku) continue;
+      const row = document.createElement("article");
+      row.className = "onboarding-stock-row";
+
+      const heading = document.createElement("div");
+      heading.className = "onboarding-stock-heading";
+      const name = document.createElement("strong");
+      name.textContent = `${itemEmoji(itemId)} ${itemName(itemId)}`;
+      const pack = document.createElement("small");
+      pack.textContent = `Одна упаковка: ${humanQuantity(sku.package_quantity)}`;
+      heading.append(name, pack);
+
+      const choices = document.createElement("div");
+      choices.className = "onboarding-stock-choices";
+      const selected = onboarding.quantities.get(itemId);
+      for (const [label, numerator, denominator] of stockPresets()) {
+        const choice = button(label, "onboarding-stock-choice");
+        const active = selected?.numerator === numerator && selected?.denominator === denominator;
+        choice.classList.toggle("selected", active);
+        choice.setAttribute("aria-pressed", active ? "true" : "false");
+        choice.addEventListener("click", () => {
+          onboarding.quantities.set(itemId, { numerator, denominator, label });
+          renderOnboarding();
+        });
+        choices.appendChild(choice);
+      }
+      row.append(heading, choices);
+      list.appendChild(row);
+    }
+    content.appendChild(list);
+
+    const unanswered = [...onboarding.selected].filter((itemId) => !onboarding.quantities.has(itemId));
+    if (unanswered.length) {
+      content.appendChild(paragraph(`Осталось отметить: ${unanswered.length}`, "onboarding-counter"));
+    }
+
+    const back = button("Назад");
+    back.disabled = onboarding.saving;
+    back.addEventListener("click", () => {
+      onboarding.step = "products";
+      renderOnboarding();
+    });
+    const save = button(onboarding.saving ? "Сохраняем…" : "Сохранить запасы", "primary-button onboarding-primary");
+    save.disabled = onboarding.saving || unanswered.length > 0;
+    save.addEventListener("click", saveBootstrapStocktakes);
+    actions.append(back, save);
+  }
+
+  async function saveBootstrapStocktakes() {
+    if (onboarding.saving) return;
+    onboarding.saving = true;
+    renderOnboarding();
+    const operationKeys = [];
+    try {
+      const missing = [];
+      for (const itemId of onboarding.selected) {
+        const sku = primarySku(itemId);
+        const selected = onboarding.quantities.get(itemId);
+        if (!sku || !selected) throw new Error("Не удалось подготовить выбранный остаток.");
+        const amount = scaleDecimalText(
+          sku.package_quantity.amount,
+          selected.numerator,
+          selected.denominator,
+        );
+        const operationKey = `hsp:first-use:${itemId}:${amount}:${sku.package_quantity.unit}`;
+        let operationId = sessionStorage.getItem(operationKey);
+        if (!operationId) {
+          operationId = eventId("bootstrap-stocktake");
+          sessionStorage.setItem(operationKey, operationId);
+        }
+        operationKeys.push(operationKey);
+        await request("/household/stocktakes", {
+          method: "POST",
+          body: JSON.stringify({
+            event_id: operationId,
+            item_id: itemId,
+            quantity: { amount, unit: sku.package_quantity.unit },
+            reason: "first-use bootstrap",
+          }),
+        });
+        if (selected.numerator === 0) missing.push(itemId);
+      }
+
+      for (const operationKey of operationKeys) sessionStorage.removeItem(operationKey);
+      onboarding.missingItemIds = missing;
+      for (const itemId of missing) {
+        if (!state.mustHaves.has(itemId)) state.mustHaves.set(itemId, 1);
+      }
+      renderMustHaves();
+      await refreshOperationalState();
+      onboarding.step = "done";
+      showToast("Начальные запасы сохранены.");
+    } catch (error) {
+      showToast(friendlyError(error), true);
+    } finally {
+      onboarding.saving = false;
+      renderOnboarding();
+    }
+  }
+
+  function renderDone() {
+    setProgress("Готово");
+    const icon = document.createElement("div");
+    icon.className = "onboarding-hero-icon done";
+    icon.textContent = "✓";
+    content.append(icon, title("Можно начинать"));
+
+    if (onboarding.missingItemIds.length) {
+      content.appendChild(paragraph(
+        "То, что обычно бывает дома, но сейчас закончилось, уже добавлено в обязательные покупки. Перед расчётом вы сможете всё изменить.",
+      ));
+      const missing = document.createElement("div");
+      missing.className = "onboarding-missing-list";
+      for (const itemId of onboarding.missingItemIds) {
+        const chip = document.createElement("span");
+        chip.textContent = `${itemEmoji(itemId)} ${itemName(itemId)}`;
+        missing.appendChild(chip);
+      }
+      content.appendChild(missing);
+    } else {
+      content.appendChild(paragraph(
+        "Запасы сохранены. Если нужно купить что-то прямо сейчас, добавьте продукт в «Нужно что-то обязательно?» перед расчётом.",
+      ));
+    }
+
+    const home = button("Посмотреть запасы");
+    home.addEventListener("click", () => {
+      closeOnboarding();
+      setView("home");
+    });
+    const shopping = button("Составить покупки", "primary-button onboarding-primary");
+    shopping.addEventListener("click", () => {
+      closeOnboarding();
+      setView("shopping");
+      byId("plan-budget")?.focus();
+    });
+    actions.append(home, shopping);
+  }
+
+  function renderOnboarding() {
+    clearSurface();
+    skip.classList.toggle("hidden", onboarding.step === "done");
+    if (onboarding.step === "welcome") renderWelcome();
+    else if (onboarding.step === "products") renderProducts();
+    else if (onboarding.step === "stock") renderStock();
+    else renderDone();
+  }
+
+  skip.addEventListener("click", dismissOnboarding);
+  layer.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && onboarding.step !== "done") dismissOnboarding();
+  });
+
+  const firstRunObserver = new MutationObserver(() => {
+    if (!firstRunCard.classList.contains("hidden")) openOnboarding();
+  });
+  firstRunObserver.observe(firstRunCard, { attributes: true, attributeFilter: ["class"] });
+  if (!firstRunCard.classList.contains("hidden")) openOnboarding();
+})();

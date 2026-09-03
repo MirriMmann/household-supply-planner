@@ -1343,7 +1343,7 @@ HouseholdEventRepository
         ↓ one history snapshot
 HouseholdHistory @ as_of
         ├── project_household_state()
-        └── estimate_all_consumption()
+        └── estimate_all_depletion()
                     ↓
       RecurringNeedSource + ExplicitNeedSource
                     ↓
@@ -1392,9 +1392,123 @@ Natural language остаётся следующим слоем и не нуже
 
 ---
 
-## 12. Что намеренно не входит в domain/planning core
+## 12. Closed-loop household operations & depletion learning (M10)
 
-Даже после M9 domain/planning core не включает:
+M10 замыкает operational loop вокруг M8/M9, но не добавляет новый planner и не меняет source-of-truth household events.
+
+```text
+stocktake -> InventoryCorrection
+plan -> persisted PlanRecord
+actual packaged purchase -> PurchaseEvent
+later stocktake -> InventoryCorrection
+                 ↓
+        derived depletion window
+                 ↓
+        depletion-aware estimate
+                 ↓
+        existing RecurringNeedSource
+                 ↓
+        existing M9 workflow
+```
+
+### Derived depletion is not inventory mutation
+
+Для consecutive absolute stocktakes одного Item:
+
+```text
+inferred_depletion = start + confirmed_inflow - end
+```
+
+Покупки учитываются только если их `occurred_at` лежит в `(start, end]`: purchase на timestamp start уже superseded absolute start count, а purchase на timestamp end применяется перед end correction согласно M8 precedence.
+
+Derived window никогда не записывается как `ConsumptionObservation` и не попадает в `HouseholdEventRepository`. Он существует только как reproducible learning projection. Поэтому:
+
+```text
+InventoryCorrection -> authoritative state set
+derived depletion   -> learning evidence only
+```
+
+и одна физическая убыль не вычитается из inventory дважды.
+
+### Window dispositions
+
+`StocktakeDepletionWindow` self-validating и имеет один из statuses:
+
+```text
+USED
+ZERO_DEPLETION
+UNEXPLAINED_INCREASE
+EXPLICIT_CONFLICT
+```
+
+- `USED`: exact positive `start + purchases - end`;
+- `ZERO_DEPLETION`: valid zero quantity over positive duration;
+- `UNEXPLAINED_INCREASE`: end quantity выше start + known purchases;
+- `EXPLICIT_CONFLICT`: direct explicit consumption внутри interval больше total depletion, implied stocktake arithmetic.
+
+Последние два statuses не создают derived rate sample. Facts сохраняются и могут быть исправлены/дополнены будущим event, но estimator не угадывает скрытый inflow.
+
+### Evidence de-duplication
+
+Accepted stocktake window описывает total physical depletion на всём interval. Direct `ConsumptionObservation`, полностью находящийся внутри accepted window, поэтому shadowed **только в learning projection**. Иначе total depletion и его часть были бы посчитаны дважды.
+
+Если stocktake window invalid, direct observation не shadowed и остаётся independent evidence.
+
+Zero-depletion windows создают zero-quantity `UsageRateSample`: duration входит в denominator weighted rate. All-zero evidence не создаёт `ConsumptionEstimate` и не генерирует recurring demand.
+
+`ConsumptionEstimate` остаётся compatibility type M8. M10 добавляет `total_depleted` property как product-level имя exact evidence; historical `total_consumed` не удаляется.
+
+### Household mutation boundary
+
+`HouseholdOperationsService` принимает typed single-event commands:
+
+```text
+StocktakeCommand
+PurchaseConfirmationCommand
+```
+
+Stocktake resolve-ит canonical Item через configured catalog и создаёт existing `InventoryCorrection`. Packaged purchase resolve-ит exact SKU и вычисляет quantity как `package_quantity × packs`, после чего создаёт existing `PurchaseEvent`.
+
+Plan-linked purchase:
+
+```text
+PlanId + current SKU + actual packs
+        ↓
+read historical PlanRecord only
+        ↓
+validate old item/package identity
+        ↓
+PurchaseEvent(source_ref="plan:<id>")
+```
+
+Plan read не запускает market acquisition или recomputation. Actual packs могут отличаться от planned packs, включая zero-planned extra SKU: plan описывает recommendation, event — reality.
+
+`HouseholdEventId` служит idempotency identity. Повтор с тем же semantic command возвращает существующий fact; тот же ID с другим payload fail-closed как operation conflict.
+
+Перед durable append hypothetical history проходит current projection + depletion validation. Один HTTP mutation создаёт максимум один event; M10 намеренно не заявляет crash-atomic batch confirmation нескольких файлов.
+
+### Closed-loop JSON/ASGI surface
+
+`HouseholdClosedLoopJsonApi` композиционно оборачивает M9 API:
+
+```text
+GET  /household/state
+GET  /household/history
+GET  /household/estimates
+POST /household/stocktakes
+POST /household/purchases
+POST /plans/{plan_id}/purchases
+```
+
+Остальные `/plans` routes делегируются M9/M7.
+
+Generic `PlanAsgiApp` получает opt-in `accepts_json_body()` policy вместо hardcoded единственного `/plans`. Raw JSON decode теперь запрещает duplicate keys и non-finite constants и bounded по прежнему `max_body_bytes`.
+
+---
+
+## 13. Что намеренно не входит в domain/planning core
+
+Даже после M10 domain/planning core не включает:
 
 - HTTP/ASGI transport semantics;
 - UI;

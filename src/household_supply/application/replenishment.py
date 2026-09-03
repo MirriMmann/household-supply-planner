@@ -19,7 +19,7 @@ from household_supply.household import (
     HouseholdLearningService,
     HouseholdState,
     RecurringNeedSource,
-    estimate_all_consumption,
+    estimate_all_depletion,
     project_household_state,
 )
 
@@ -122,7 +122,7 @@ class HouseholdReplenishmentPreparation:
             raise ValueError(
                 "household replenishment state does not match history/as_of basis"
             )
-        expected_estimates = estimate_all_consumption(self.history, as_of=self.as_of)
+        expected_estimates = estimate_all_depletion(self.history, as_of=self.as_of)
         if estimates != expected_estimates:
             raise ValueError(
                 "household replenishment estimates do not match history/as_of basis"
@@ -267,7 +267,7 @@ class HouseholdReplenishmentService:
         _require_aware(as_of, label="household replenishment as_of")
         history = self.household.history()
         state = project_household_state(history, as_of=as_of)
-        estimates = estimate_all_consumption(history, as_of=as_of)
+        estimates = estimate_all_depletion(history, as_of=as_of)
         compilation, application_request = _compile_replenishment_inputs(
             request,
             self.plans.planner.catalog,

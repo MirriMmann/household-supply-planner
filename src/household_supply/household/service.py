@@ -4,9 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from household_supply.domain.money import DecimalLike
 
+from .depletion import (
+    DepletionLearningReport,
+    depletion_learning_reports,
+    estimate_all_depletion,
+)
 from .events import HouseholdEvent
 from .history import HouseholdHistory
-from .learning import ConsumptionEstimate, estimate_all_consumption
+from .learning import ConsumptionEstimate
 from .persistence import HouseholdEventRepository
 from .projection import HouseholdState, project_household_state
 from .recurring import RecurringNeedSource
@@ -27,10 +32,17 @@ class HouseholdLearningService:
     def state(self, *, as_of: datetime) -> HouseholdState:
         return project_household_state(self.history(), as_of=as_of)
 
+    def depletion_reports(
+        self, *, as_of: datetime | None = None
+    ) -> tuple[DepletionLearningReport, ...]:
+        return depletion_learning_reports(self.history(), as_of=as_of)
+
     def estimates(
         self, *, as_of: datetime | None = None
     ) -> tuple[ConsumptionEstimate, ...]:
-        return estimate_all_consumption(self.history(), as_of=as_of)
+        # M10 broadens the learning basis from explicit ConsumptionObservation
+        # events to transparent depletion evidence derived between stocktakes.
+        return estimate_all_depletion(self.history(), as_of=as_of)
 
     def recurring_need_source(
         self,

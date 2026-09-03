@@ -11,6 +11,19 @@ Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 
+def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_non_finite_json(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is not allowed: {value}")
+
+
 class JsonApiHandler(Protocol):
     def handle(
         self,
@@ -60,7 +73,12 @@ class PlanAsgiApp:
         request_target = path + (f"?{query}" if query else "")
         payload = None
 
-        if method.upper() == "POST" and path == "/plans":
+        accepts_json_body = method.upper() == "POST" and path == "/plans"
+        body_policy = getattr(self.api, "accepts_json_body", None)
+        if callable(body_policy):
+            accepts_json_body = bool(body_policy(method, path))
+
+        if accepts_json_body:
             headers = {
                 bytes(key).lower(): bytes(value)
                 for key, value in scope.get("headers", [])
@@ -101,8 +119,17 @@ class PlanAsgiApp:
                     break
             try:
                 decoded = body.decode("utf-8")
-                candidate = loads(decoded)
-            except (UnicodeDecodeError, JSONDecodeError):
+                candidate = loads(
+                    decoded,
+                    object_pairs_hook=_strict_object_pairs,
+                    parse_constant=_reject_non_finite_json,
+                )
+            except (
+                UnicodeDecodeError,
+                JSONDecodeError,
+                ValueError,
+                RecursionError,
+            ):
                 await self._send_json(send, 400, {"error": "invalid_json"})
                 return
             if not isinstance(candidate, dict):

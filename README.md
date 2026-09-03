@@ -200,46 +200,65 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M9 — Household Replenishment Workflow реализован.**
+**M10 — Closed-Loop Household Operations & Depletion Learning реализован.**
 
-M1–M8 доказали deterministic planning, live market evidence, durable plan history и replayable household state. M9 впервые собирает эти capabilities в одну household-aware прикладную операцию:
-
-```text
-HouseholdHistory
-+ horizon_days
-+ optional explicit needs
-+ budget
-        ↓
-HouseholdReplenishmentService
-        ↓
-HouseholdState + ConsumptionEstimate
-        ↓
-RecurringNeedSource + ExplicitNeedSource
-        ↓
-M2 DemandCompilation
-        ↓
-M6 ApplicationPlanRequest
-        ↓
-M6 market acquisition + M3 planner
-        ↓
-M7 persisted PlanRecord
-```
-
-Workflow читает household history **один раз** и использует один `as_of` для state и consumption estimates. Поэтому concurrent append после snapshot не может сделать inventory и learned demand внутренне несогласованными.
-
-`ProcurementPlan` по-прежнему не создаёт `PurchaseEvent`: M9 заканчивается persisted recommendation, а факт совершённой покупки остаётся отдельным household observation.
-
-M9 fail-closed, если learned recurring Item отсутствует в configured market catalog. Такая потребность не исчезает молча и не запускает network acquisition. Unrelated household inventory, которое не участвует в текущем compiled demand, не навязывается application market surface.
-
-Отдельный `HouseholdReplenishmentJsonApi` использует durable `/plans` surface:
+M1–M9 построили deterministic planner, live market boundary, durable plan history, replayable household state и household-aware replenishment workflow. M10 впервые замыкает реальный пользовательский цикл без требования вручную логировать каждое потребление:
 
 ```text
-POST /plans          -> household-aware persisted plan
-GET  /plans/{id}     -> existing M7 historical record
-GET  /plans?limit=N  -> existing M7 recent history
+stocktake
+   ↓
+InventoryCorrection
+   ↓
+M9 plan
+   ↓
+actual purchase confirmation
+   ↓
+PurchaseEvent
+   ↓
+later stocktake
+   ↓
+derived depletion evidence
+   ↓
+next M9 replenishment plan
 ```
 
-M6 `PlanJsonApi` и M7 `PlanLifecycleJsonApi` остаются отдельными embedding surfaces. Natural-language слой пока не нужен: будущий AI будет переводить пользовательскую фразу в уже доказанный `HouseholdReplenishmentRequest`, а не владеть household arithmetic, market truth или planner decisions.
+Ключевая формула:
+
+```text
+inferred depletion =
+    start stock
+  + confirmed purchases
+  - end stock
+```
+
+Derived depletion **не является household event** и не меняет inventory второй раз. Source of truth остаются persisted `InventoryCorrection`, `PurchaseEvent` и optional direct `ConsumptionObservation`.
+
+Если interval показывает необъяснимое увеличение запасов или конфликтует с прямым consumption evidence, derived window не используется для recurring learning. Никакого negative consumption или скрытого исправления истории. Valid zero-depletion intervals учитывают observed time и могут снижать learned rate.
+
+Accepted stocktake window заменяет перекрывающий explicit consumption sample только в learning projection, чтобы физическая убыль не учитывалась дважды. Direct observations вне accepted windows продолжают работать как раньше.
+
+M9 теперь использует depletion-aware exact evidence basis. Legacy `ConsumptionEstimate.total_consumed` сохранён для compatibility, а M10 добавляет продуктовый alias `total_depleted`. Recurring demand по-прежнему считается из exact total + exact duration, не из округлённой display-rate.
+
+Добавлен единый closed-loop JSON surface:
+
+```text
+GET  /household/state
+GET  /household/history
+GET  /household/estimates
+POST /household/stocktakes
+POST /household/purchases
+POST /plans/{plan_id}/purchases
+
+POST /plans                 # existing M9 replenishment
+GET  /plans/{id}            # existing M7 history
+GET  /plans?limit=N         # existing M7 history
+```
+
+Каждый household mutation request создаёт максимум один event. Plan-linked purchase confirmation может отличаться от planned quantity; plan остаётся recommendation, а event описывает фактическую реальность. Historical plan SKU также проверяется против current catalog item/package identity перед attribution.
+
+Generic ASGI JSON boundary теперь reject'ит duplicate object keys и non-finite JSON numbers (`NaN`/`Infinity`) до application parsing.
+
+Следующий milestone — **M11 Local Web MVP**, а Natural Language Interface сдвинут на M12: сначала нужно проверить реальный closed-loop UX, а уже потом улучшать способ ввода намерений.
 
 Подробнее:
 
@@ -248,7 +267,7 @@ M6 `PlanJsonApi` и M7 `PlanLifecycleJsonApi` остаются отдельны�
 
 ## Текущая исполнимая гарантия
 
-> Budget + planning horizon + optional explicit needs можно объединить с одним replayable household snapshot и exact consumption evidence, скомпилировать в attributable demand, провести через существующий market/planner stack и сохранить как historical PlanRecord без новой planning authority.
+> Реальные stocktake/purchase facts можно замкнуть в replayable household state, вывести из последовательных stocktake auditable depletion evidence и использовать её в следующем persisted M9 replenishment plan без двойного списания inventory или скрытого model state.
 
 Проверка из активированного виртуального окружения:
 
@@ -264,6 +283,7 @@ python examples/m6_application_service.py
 python examples/m7_plan_persistence.py
 python examples/m8_household_learning.py
 python examples/m9_household_replenishment.py
+python examples/m10_closed_loop_household.py
 ```
 
 Опциональные **live smoke** (требуют сети и обращаются к публичному Globus demo catalog):
@@ -273,4 +293,4 @@ python examples/m5_globus_live.py
 python examples/m6_globus_live.py
 ```
 
-CI остаётся полностью offline. M9 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.
+CI остаётся полностью offline. M10 по-прежнему не требует PostgreSQL, Redis, Docker orchestration, frontend, auth или LLM.

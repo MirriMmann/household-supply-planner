@@ -578,9 +578,148 @@ M9 не создаёт второй planner. Он materialize-ит household-der
 
 ---
 
-## M10 — Natural Language Interface
+## M10 — Closed-Loop Household Operations & Depletion Learning
 
-Только после доказанного M9 workflow появляется AI-интерпретация пользовательских запросов.
+**Статус: реализован.**
+
+Цель: замкнуть реальный household replenishment loop без требования вручную логировать каждое использование продукта.
+
+```text
+stocktake
+   ↓
+InventoryCorrection
+   ↓
+plan
+   ↓
+confirmed real purchase
+   ↓
+PurchaseEvent
+   ↓
+later stocktake
+   ↓
+derived depletion window
+   ↓
+transparent depletion estimate
+   ↓
+next M9 replenishment plan
+```
+
+### Household operations
+
+Добавлен `HouseholdOperationsService` с single-event mutation semantics:
+
+- absolute stocktake → existing `InventoryCorrection`;
+- manual packaged purchase → existing `PurchaseEvent`;
+- plan-linked packaged purchase confirmation → existing `PurchaseEvent` с `source_ref=plan:<id>`;
+- current state/history/depletion reads;
+- idempotent retry по `HouseholdEventId`;
+- exact current-catalog SKU resolution;
+- plan-linked confirmation сравнивает historical `item_id`, package quantity и planned packs с текущим SKU;
+- unknown plan не создаёт household fact;
+- mutation preflight проверяет projection/depletion consistency до durable append.
+
+Один mutation request создаёт максимум **один** household event. Batch-confirmation нескольких SKU намеренно не притворяется атомарной транзакцией поверх per-event filesystem repository. UI позже может подтвердить строки плана по одной.
+
+### Stocktake-derived depletion
+
+Между двумя последовательными absolute stocktakes одного Item вычисляется:
+
+```text
+inferred depletion =
+    start quantity
+  + confirmed purchases inside interval
+  - end quantity
+```
+
+Derived depletion — **не persisted household event** и не изменяет inventory projection. Это learning evidence only. Поэтому correction не приводит к второму скрытому списанию inventory.
+
+Window dispositions:
+
+```text
+used                  # positive auditable depletion
+zero_depletion        # valid zero-rate observed interval
+unexplained_increase  # end > start + confirmed inflow
+explicit_conflict     # direct consumption evidence > inferred total depletion
+```
+
+`unexplained_increase` и `explicit_conflict` fail-closed для derived learning. Они не превращаются в negative consumption и не удаляют direct evidence.
+
+Accepted stocktake window является authoritative total-depletion evidence на своём interval. Перекрывающий его explicit `ConsumptionObservation` shadowed только для learning, чтобы одна и та же физическая убыль не учитывалась дважды. Если window invalid, direct observation остаётся usable.
+
+Zero-depletion window не исчезает: он добавляет observed duration и поэтому может снижать weighted rate. All-zero evidence не создаёт recurring demand.
+
+### M9 integration
+
+M9 preparation теперь использует depletion-aware estimate:
+
+```text
+stocktake windows + non-shadowed direct observations
+                    ↓
+             exact rate evidence
+                    ↓
+           ConsumptionEstimate
+           (legacy type name)
+                    ↓
+          RecurringNeedSource
+                    ↓
+                  M9
+```
+
+`ConsumptionEstimate.total_consumed` сохранён ради compatibility; M10 добавляет product-level alias `total_depleted`. Recurring arithmetic по-прежнему использует exact total evidence + exact observed duration, а не rounded display rate.
+
+### Unified JSON surface
+
+`HouseholdClosedLoopJsonApi` добавляет:
+
+```text
+GET  /household/state
+GET  /household/history
+GET  /household/estimates
+POST /household/stocktakes
+POST /household/purchases
+POST /plans/{plan_id}/purchases
+```
+
+и делегирует existing M9/M7 `/plans` routes без дублирования planning/persistence logic.
+
+Generic ASGI adapter получил opt-in body policy для новых POST routes. Raw JSON parser теперь fail-closed на duplicate object keys, `NaN`/`Infinity` и recursion errors.
+
+### Definition of Done
+
+> Пользователь может зафиксировать реальный stocktake, подтвердить фактическую packaged purchase (в том числе связанную с historical plan), сделать следующий stocktake и получить auditable depletion evidence, которое влияет на следующий M9 replenishment plan; derived learning не переписывает household history, не списывает inventory второй раз и fail-closed обрабатывает необъяснимые или противоречивые intervals.
+
+---
+
+## M11 — Local Web MVP
+
+Цель: впервые дать человеку пользоваться closed-loop системой несколько дней без Python/JSON вручную.
+
+Минимальный UI:
+
+```text
+Home / current stock
+Stocktake
+Plan replenishment
+Plan explanation
+Purchase confirmation
+History / depletion evidence
+```
+
+Предпочтительный первый frontend:
+
+- semantic HTML;
+- CSS;
+- небольшой vanilla JS;
+- existing ASGI/JSON backend;
+- один лёгкий ASGI server dependency только на runtime boundary.
+
+React/Next.js/database/auth не нужны до доказанного usability requirement.
+
+---
+
+## M12 — Natural Language Interface
+
+Только после первого реального UI/pilot появляется AI-интерпретация пользовательских запросов.
 
 Пример:
 
@@ -592,14 +731,14 @@ candidate HouseholdReplenishmentRequest
             ↓
 validation / clarification
             ↓
-existing deterministic M9 workflow
+existing deterministic M9/M10 workflow
 ```
 
 AI не получает право:
 
 - выдумывать цены;
-- создавать `PurchaseEvent` из recommendation;
-- считать household consumption вместо M8 evidence model;
+- создавать `PurchaseEvent` из recommendation без explicit confirmation;
+- считать depletion вместо explicit stocktake/purchase evidence model;
 - игнорировать hard constraints;
 - считать предложение магазина актуальным без market evidence.
 

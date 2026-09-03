@@ -42,6 +42,7 @@ jobs:
           python examples/m7_plan_persistence.py
           python examples/m8_household_learning.py
           python examples/m9_household_replenishment.py
+          python examples/m10_closed_loop_household.py
 
       - name: Compile Python sources
         run: python -m compileall -q src examples tests

@@ -19,7 +19,7 @@ RECURRING_NEED_DECIMAL_PLACES = 12
 
 @dataclass(frozen=True, slots=True)
 class RecurringNeedSource:
-    """DemandSource backed by explicit, inspectable consumption estimates."""
+    """DemandSource backed by explicit, inspectable usage/depletion estimates."""
 
     source_id: str
     horizon_days: Decimal
@@ -55,7 +55,7 @@ class RecurringNeedSource:
     def emit_contributions(self) -> tuple[DemandContribution, ...]:
         contributions = []
         for estimate in self.estimates:
-            consumed = estimate.total_consumed.as_base()
+            consumed = estimate.total_depleted.as_base()
             day_microseconds = multiply_decimal_by_int_exact(
                 self.horizon_days, 86_400_000_000
             )

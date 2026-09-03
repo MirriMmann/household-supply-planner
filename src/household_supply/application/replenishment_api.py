@@ -152,6 +152,10 @@ def serialize_household_replenishment_result(
                     "daily_quantity": _quantity(estimate.daily_quantity),
                     "sample_count": estimate.sample_count,
                     "observed_days": str(estimate.observed_days),
+                    # M10 broadens the estimator to stocktake-derived depletion.
+                    # Keep total_consumed for M8/M9 wire compatibility while
+                    # exposing the product-level depletion name explicitly.
+                    "total_depleted": _quantity(estimate.total_depleted),
                     "total_consumed": _quantity(estimate.total_consumed),
                     "observed_microseconds": estimate.observed_microseconds,
                     "daily_min": _quantity(estimate.daily_min),

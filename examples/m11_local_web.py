@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 from household_supply.application import (
     FilePlanRepository,
     HouseholdClosedLoopJsonApi,
+    DemandScopedPlanApplicationService,
     PlanApplicationService,
     PlanLifecycleService,
     HouseholdReplenishmentService,
@@ -35,6 +36,7 @@ from household_supply.domain import (
     SKU,
 )
 from household_supply.household import FileHouseholdEventRepository, HouseholdLearningService
+from household_supply.market import GlobusCatalogProviderFactory
 from household_supply.web import (
     HouseholdLocalWebApp,
     HouseholdWebJsonApi,
@@ -101,15 +103,15 @@ def build_demo_catalog() -> tuple[CatalogSnapshot, tuple[DemoMarketEntry, ...]]:
     return CatalogSnapshot(tuple(entry.sku for entry in entries), bindings), entries
 
 
-def build_demo_app(data_dir: Path, *, allow_remote_hosts: bool = False) -> HouseholdLocalWebApp:
-    catalog, entries = build_demo_catalog()
+def _build_web_app(
+    data_dir: Path,
+    *,
+    catalog: CatalogSnapshot,
+    planner,
+    allow_remote_hosts: bool = False,
+) -> HouseholdLocalWebApp:
     household = HouseholdLearningService(
         FileHouseholdEventRepository(data_dir / "household-events")
-    )
-    planner = PlanApplicationService(
-        catalog,
-        (CurrentDemoMarketProvider(entries),),
-        clock=utc_now,
     )
     lifecycle = PlanLifecycleService(
         planner,
@@ -126,12 +128,56 @@ def build_demo_app(data_dir: Path, *, allow_remote_hosts: bool = False) -> House
     return HouseholdLocalWebApp(web_api, allow_non_loopback_hosts=allow_remote_hosts)
 
 
+def build_demo_app(data_dir: Path, *, allow_remote_hosts: bool = False) -> HouseholdLocalWebApp:
+    catalog, entries = build_demo_catalog()
+    planner = PlanApplicationService(
+        catalog,
+        (CurrentDemoMarketProvider(entries),),
+        clock=utc_now,
+    )
+    return _build_web_app(
+        data_dir,
+        catalog=catalog,
+        planner=planner,
+        allow_remote_hosts=allow_remote_hosts,
+    )
+
+
+def build_live_globus_app(
+    data_dir: Path, *, allow_remote_hosts: bool = False
+) -> HouseholdLocalWebApp:
+    # Lazy import keeps the default offline M11 example deterministic while the
+    # live mode consumes the separately maintained M5.1 catalog pack.
+    from household_supply.market.catalogs.globus_demo_staples import (
+        build_globus_demo_staples_catalog,
+    )
+
+    catalog, listings = build_globus_demo_staples_catalog()
+    provider_factory = GlobusCatalogProviderFactory(catalog, listings)
+    planner = DemandScopedPlanApplicationService(
+        catalog,
+        provider_factory,
+        clock=utc_now,
+    )
+    return _build_web_app(
+        data_dir,
+        catalog=catalog,
+        planner=planner,
+        allow_remote_hosts=allow_remote_hosts,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Household Supply Planner M11 local web MVP")
     parser.add_argument("--serve", action="store_true", help="run the local HTTP server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", type=Path)
+    parser.add_argument(
+        "--live-globus",
+        action="store_true",
+        help="use the real M5.1 Globus catalog and live request-scoped acquisition",
+    )
     parser.add_argument(
         "--allow-remote",
         action="store_true",
@@ -143,13 +189,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.serve:
-        data_dir = args.data_dir or (Path.home() / ".household-supply-planner" / "m11-demo")
+        profile = "m11-globus" if args.live_globus else "m11-demo"
+        data_dir = args.data_dir or (Path.home() / ".household-supply-planner" / profile)
         data_dir.mkdir(parents=True, exist_ok=True)
-        app = build_demo_app(data_dir, allow_remote_hosts=args.allow_remote)
+        app = (
+            build_live_globus_app(data_dir, allow_remote_hosts=args.allow_remote)
+            if args.live_globus
+            else build_demo_app(data_dir, allow_remote_hosts=args.allow_remote)
+        )
         print("M11 local web MVP")
         print(f"  data: {data_dir.resolve()}")
         print(f"  open: http://{args.host}:{args.port}/")
-        print("  note: demo catalog/market is offline fixture data; planner/household semantics are real")
+        if args.live_globus:
+            print("  market: live Globus, scoped to Items demanded by each plan")
+        else:
+            print("  market: offline fixture data; planner/household semantics are real")
         serve_local_web(
             app,
             host=args.host,

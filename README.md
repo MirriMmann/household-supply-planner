@@ -200,7 +200,7 @@ OTC-лекарства также не входят в первый домен: 
 
 ## Текущий статус
 
-**M11 — Local Web MVP реализован.**
+**M11.2 — Local Web MVP + request-scoped live Globus integration реализован.**
 
 M1–M10 уже дают deterministic planner, market evidence, durable plan history и closed-loop household operations. M11 впервые делает этот цикл доступным обычному локальному пользователю без ручной работы с Python/JSON:
 
@@ -245,9 +245,17 @@ python -m pip install -e ".[dev,web]"
 python examples/m11_local_web.py --serve
 ```
 
-Затем открыть `http://127.0.0.1:8765/`. Demo host использует durable file repositories и offline fixture catalog/market; household/planning/persistence semantics при этом настоящие. Реальный расширенный Globus catalog может быть подключён тем же host boundary без изменения UI architecture.
+Затем открыть `http://127.0.0.1:8765/`. Default demo host остаётся полностью offline для CI и разработки.
 
-Следующий milestone — **M12 Natural Language Interface**, но только после повторной ручной проверки mass-market UX M11. AI должен переводить язык пользователя в typed request, а не становиться новым planner или источником market truth.
+После установки M5.1 real catalog pack тот же UI можно запустить с живым Globus market:
+
+```bash
+python examples/m11_local_web.py --serve --live-globus
+```
+
+Live composition использует полный canonical M5.1 catalog для browser discovery, но перед внешним acquisition выбирает только exact retailer listings для `Item`, реально присутствующих в текущем planning request. Поэтому запрос на молоко не сканирует весь catalog. Selection идёт через existing `CatalogBinding`, а не по названиям. Offline и live profiles используют разные default data directories, чтобы demo household history не смешивалась с real-catalog identity.
+
+Следующий milestone — **M12 First-Use Experience & Household Bootstrap**: новый пользователь должен начать работу без ручного изучения терминов и без заполнения полного инвентаря. Natural Language остаётся downstream adapter после первого реального usability pilot.
 
 Подробнее:
 

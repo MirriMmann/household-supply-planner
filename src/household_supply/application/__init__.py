@@ -57,7 +57,8 @@ from .persistence import (
     PlanRepository,
     PlanRepositoryError,
 )
-from .service import ApplicationMarketError, PlanApplicationService
+from .service import ApplicationMarketError, ApplicationPlanner, PlanApplicationService
+from .scoped_service import DemandScopedPlanApplicationService, ProviderFactory
 from .replenishment import (
     HouseholdReplenishmentPreparation,
     HouseholdReplenishmentRequest,
@@ -81,6 +82,7 @@ __all__ = [
     "PurchaseConfirmationResult",
     "StocktakeCommand",
     "ApplicationMarketError",
+    "ApplicationPlanner",
     "ApplicationPlanRequest",
     "ApplicationPlanResult",
     "ApplicationRequestError",
@@ -92,6 +94,8 @@ __all__ = [
     "JsonApiResponse",
     "JsonPayloadError",
     "PlanApplicationService",
+    "DemandScopedPlanApplicationService",
+    "ProviderFactory",
     "PlanAsgiApp",
     "PlanId",
     "PlanJsonApi",

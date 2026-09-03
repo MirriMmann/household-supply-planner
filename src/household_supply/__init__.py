@@ -50,6 +50,7 @@ from .market import (
     MarketObservationDisposition,
     MarketObservationDispositionStatus,
     MarketProvider,
+    GlobusCatalogProviderFactory,
     StaticMarketProvider,
     GlobusOnlineDemoProvider,
     GlobusOnlineError,
@@ -98,6 +99,7 @@ __all__ = [
     "MarketObservationDisposition",
     "MarketObservationDispositionStatus",
     "MarketProvider",
+    "GlobusCatalogProviderFactory",
     "GlobusOnlineDemoProvider",
     "GlobusOnlineError",
     "GlobusOnlineFetchError",
@@ -144,6 +146,7 @@ __all__ = [
 
 from .application import (
     ApplicationMarketError,
+    ApplicationPlanner,
     ApplicationPlanRequest,
     ApplicationPlanResult,
     ApplicationRequestError,
@@ -168,6 +171,7 @@ from .application import (
     PurchaseConfirmationCommand,
     PurchaseConfirmationResult,
     StocktakeCommand,
+    DemandScopedPlanApplicationService,
     PlanApplicationService,
     PlanAsgiApp,
     PlanId,
@@ -203,6 +207,7 @@ from .application import (
 
 __all__ += [
     "ApplicationMarketError",
+    "ApplicationPlanner",
     "ApplicationPlanRequest",
     "ApplicationPlanResult",
     "ApplicationRequestError",
@@ -227,6 +232,7 @@ __all__ += [
     "PurchaseConfirmationCommand",
     "PurchaseConfirmationResult",
     "StocktakeCommand",
+    "DemandScopedPlanApplicationService",
     "PlanApplicationService",
     "PlanAsgiApp",
     "PlanId",

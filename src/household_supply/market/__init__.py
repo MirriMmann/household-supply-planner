@@ -29,6 +29,7 @@ __all__ = [
 ]
 
 from .providers import (
+    GlobusCatalogProviderFactory,
     GlobusOnlineDemoProvider,
     GlobusOnlineError,
     GlobusOnlineFetchError,
@@ -43,6 +44,7 @@ from .providers import (
 )
 
 __all__ += [
+    "GlobusCatalogProviderFactory",
     "GlobusOnlineDemoProvider",
     "GlobusOnlineError",
     "GlobusOnlineFetchError",

@@ -1597,6 +1597,26 @@ HTML/CSS/JS входят в wheel package data. ASGI server dependency оста�
 
 M11 presentation intentionally does not expose backend vocabulary as the user's mental model. Russian is the first presentation locale, while domain identifiers and quantities remain locale-independent. The primary stock flow operates in package-relative choices (`Нет`, `Половина`, `1 упаковка`, `2 упаковки`) and converts those choices to the exact SKU package quantity before sending the existing M10 command. An exact amount is progressive disclosure and its unit is derived from the package rather than chosen independently by the user.
 
+### 13.1 Request-scoped live market integration (M11.2)
+
+M5.1 расширяет canonical catalog, но полный catalog не должен автоматически означать полный network scan. `DemandScopedPlanApplicationService` сначала выполняет existing application catalog preflight, затем передаёт только demanded `Item` IDs в provider factory. Для Globus `GlobusCatalogProviderFactory` разрешает эти Items через exact `CatalogBinding` и создаёт `GlobusOnlineDemoProvider` только с соответствующими listings.
+
+```text
+validated ApplicationPlanRequest
+        ↓ demanded Item IDs
+exact CatalogBinding selection
+        ↓
+selected retailer listings
+        ↓
+live acquisition
+        ↓
+existing PlanApplicationService
+```
+
+Scoped layer владеет только acquisition scope. Он не изменяет market admission, planner arithmetic, lifecycle persistence или household learning. `PlanLifecycleService` зависит от общего `ApplicationPlanner` protocol (`catalog` + `plan(request)`), поэтому обычная и request-scoped compositions используют один и тот же durable lifecycle.
+
+Default M11 composition остаётся offline. `--live-globus` является explicit external-network mode и использует отдельный default data profile, чтобы fixture identities не смешивались с real-catalog household history.
+
 The purchase screen follows `system proposes, human corrects`: household state and learned depletion produce the recommendation; the person may add mandatory products and later confirm actual package counts. JavaScript may format units/currency for readability but does not become arithmetic or planning authority.
 
 ---

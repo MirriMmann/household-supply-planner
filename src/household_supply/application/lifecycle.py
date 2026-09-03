@@ -11,7 +11,7 @@ from household_supply.market import MarketCompilation
 from .json_api import serialize_plan_result
 from .models import ApplicationPlanRequest
 from .persistence import PlanId, PlanRecord, PlanRepository
-from .service import PlanApplicationService
+from .service import ApplicationPlanner
 
 
 LifecycleClock = Callable[[], datetime]
@@ -238,7 +238,7 @@ def build_plan_record(
 
 @dataclass(frozen=True, slots=True)
 class PlanLifecycleService:
-    planner: PlanApplicationService
+    planner: ApplicationPlanner
     repository: PlanRepository
     clock: LifecycleClock = _utc_now
     id_factory: PlanIdFactory = _new_plan_id

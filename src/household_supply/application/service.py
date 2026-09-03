@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Protocol, runtime_checkable
 
 from household_supply.domain import CatalogSnapshot
 from household_supply.market import (
@@ -22,6 +22,16 @@ from .models import (
 
 
 Clock = Callable[[], datetime]
+
+
+@runtime_checkable
+class ApplicationPlanner(Protocol):
+    """Planning authority consumed by lifecycle/replenishment orchestration."""
+
+    @property
+    def catalog(self) -> CatalogSnapshot: ...
+
+    def plan(self, request: ApplicationPlanRequest) -> ApplicationPlanResult: ...
 
 
 def _utc_now() -> datetime:

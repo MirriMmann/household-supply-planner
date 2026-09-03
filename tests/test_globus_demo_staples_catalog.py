@@ -1,6 +1,9 @@
 from household_supply.market.catalogs.globus_demo_staples import (
     build_globus_demo_staples_catalog,
 )
+from household_supply.market.providers.globus_online import (
+    GlobusOnlineDemoProvider,
+)
 
 
 def test_globus_demo_staples_catalog() -> None:
@@ -19,11 +22,30 @@ def test_sku_ids_are_unique() -> None:
     assert len(sku_ids) == len(set(sku_ids))
 
 
+def test_each_item_uses_one_quantity_dimension() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    dimensions_by_item: dict[str, set[str]] = {}
+
+    for sku in catalog.skus:
+        dimensions_by_item.setdefault(
+            sku.item.id,
+            set(),
+        ).add(sku.package_quantity.dimension)
+
+    assert all(
+        len(dimensions) == 1
+        for dimensions in dimensions_by_item.values()
+    )
 
 
+def test_catalog_listings_can_configure_m5_provider() -> None:
+    _, listings = build_globus_demo_staples_catalog()
 
+    provider = GlobusOnlineDemoProvider(listings=listings)
 
-
+    assert provider.provider_id == "globus-online-demo"
+    assert len(provider.listings) == len(listings)
 
 
 def test_bindings_reference_known_skus() -> None:

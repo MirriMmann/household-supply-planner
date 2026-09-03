@@ -93,20 +93,6 @@ def build_globus_demo_staples_catalog() -> tuple[
                 "38d9c8524241466b85a953c22c5b9d67000200010000"
             ),
         ),
-        _make_product(
-            item_id="milk",
-            item_name="Молоко",
-            category="dairy",
-            sku_id="globus_milk_prostokvashino_950g",
-            sku_name="Молоко Простоквашино стерил 2,5 % 950г",
-            package_amount="950",
-            package_unit="g",
-            brand="Простоквашино",
-            url=(
-                "https://globus-online.kg/ru-kg/good/"
-                "bb6eab5bc8de4b09974749148f8535d2000200010000"
-            ),
-        ),
 
         # Pasta
         _make_product(
@@ -419,7 +405,6 @@ def build_globus_demo_staples_catalog() -> tuple[
         ),
     )
 
-    items = tuple(product[0] for product in products)
     skus = tuple(product[1] for product in products)
     listings = tuple(product[2] for product in products)
     bindings = tuple(product[3] for product in products)

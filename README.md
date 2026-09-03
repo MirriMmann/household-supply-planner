@@ -4,11 +4,11 @@
 
 ### Покупки, которые учитывают то, что уже есть дома.
 
-**Local-first система планирования домашних запасов и закупок.**  
+**Local-first система планирования домашних запасов и закупок.**
 Она хранит фактические остатки, учится по тому, что заканчивается, получает market evidence и строит детерминированный план покупки под бюджет.
 
 [![CI](https://github.com/MirriMmann/household-supply-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/MirriMmann/household-supply-planner/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/Python-3.11%2B-111111?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11%2B-111111?logo=python\&logoColor=white)
 
 </div>
 
@@ -24,14 +24,14 @@
 Что стоит купить — и почему
 ```
 
-Household Supply Planner — не ещё один grocery list и не каталог готовых рецептов.  
+Household Supply Planner — не ещё один grocery list и не каталог готовых рецептов.
 Это маленькая planning system для повторяющихся домашних закупок:
 
-- она отделяет **потребность** от конкретного товара в магазине;
-- учитывает **то, что уже есть дома**;
-- рассматривает цену как **наблюдение рынка**, а не вечное свойство товара;
-- рассчитывает целые упаковки и бюджет **детерминированно**;
-- меняет household state только после **фактического подтверждения** человеком.
+* она отделяет **потребность** от конкретного товара в магазине;
+* учитывает **то, что уже есть дома**;
+* рассматривает цену как **наблюдение рынка**, а не вечное свойство товара;
+* рассчитывает целые упаковки и бюджет **детерминированно**;
+* меняет household state только после **фактического подтверждения** человеком.
 
 ---
 
@@ -114,7 +114,7 @@ http://127.0.0.1:8765/
 python examples/m11_local_web.py --serve --live-globus
 ```
 
-Live composition использует реальный packaged-staples catalog Globus Online.  
+Live composition использует реальный packaged-staples catalog Globus Online.
 Перед сетевым acquisition выбираются только retailer listings для товаров, которые действительно нужны текущему запросу — полный каталог не сканируется на каждый plan.
 
 > Live market mode зависит от доступности и текущей структуры публичного retailer surface. CI остаётся полностью offline.
@@ -151,7 +151,7 @@ ProcurementPlan != PurchaseEvent
 
 ### Learning без скрытой магии
 
-Система учится по наблюдаемым stocktakes и подтверждённым покупкам.  
+Система учится по наблюдаемым stocktakes и подтверждённым покупкам.
 Если данные противоречат друг другу или появляется необъяснимый inflow, модель не выдумывает расход.
 
 ---
@@ -162,19 +162,19 @@ ProcurementPlan != PurchaseEvent
 
 Текущий vertical slice включает:
 
-- deterministic package-aware procurement planner;
-- budget constraints и infeasible results;
-- multi-objective planning;
-- canonical `Item` / `SKU` / market evidence model;
-- real Globus Online provider и packaged-staples catalog;
-- request-scoped live market acquisition;
-- durable plan history;
-- append-only household event history;
-- stocktakes и purchase confirmations;
-- depletion learning;
-- recurring replenishment;
-- Russian-first mobile-friendly local web UI;
-- first-use onboarding без знания backend terminology.
+* deterministic package-aware procurement planner;
+* budget constraints и infeasible results;
+* multi-objective planning;
+* canonical `Item` / `SKU` / market evidence model;
+* real Globus Online provider и packaged-staples catalog;
+* request-scoped live market acquisition;
+* durable plan history;
+* append-only household event history;
+* stocktakes и purchase confirmations;
+* depletion learning;
+* recurring replenishment;
+* Russian-first mobile-friendly local web UI;
+* first-use onboarding без знания backend terminology.
 
 CI проверяет Python 3.11 и 3.13, offline examples и compileability.
 
@@ -186,15 +186,29 @@ CI проверяет Python 3.11 и 3.13, offline examples и compileability.
 
 Сейчас:
 
-- основной domain — packaged food / household staples;
-- live retailer integration — Globus Online;
-- UI работает локально и по умолчанию bind'ится только на loopback;
-- remote mode не имеет полноценной authentication model;
-- natural-language interface ещё не является authority layer;
-- multi-user/cloud sync и mobile native app не входят в текущий slice.
+* основной domain — packaged food / household staples;
+* реальный catalog пока имеет ограниченное practical coverage;
+* live retailer integration — Globus Online;
+* UI работает локально и по умолчанию bind'ится только на loopback;
+* remote mode не имеет полноценной authentication model;
+* Natural Language Interface ещё не реализован как основной пользовательский вход;
+* multi-user/cloud sync и native mobile app не входят в текущий slice.
 
-Следующий evidence gate — **внешний usability pilot без подсказок**.  
-Natural Language Interface начинается только после того, как базовый workflow понятен человеку сам по себе.
+Ближайший этап — не добавление нового AI layer, а превращение работающего vertical slice в удобный бытовой продукт:
+
+```text
+practical catalog coverage
+        +
+real-use UX/UI audit
+        ↓
+faster stock updates
+        +
+in-store shopping mode
+        ↓
+daily-use household workflow
+```
+
+Natural Language Interface остаётся downstream adapter и должен появляться поверх workflow, который уже удобен без него.
 
 ---
 
@@ -239,8 +253,9 @@ deterministic planning authority
 
 Подробности:
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Roadmap](docs/ROADMAP.md)
+* [Product Vision](docs/PRODUCT_VISION.md) — каким должен стать продукт;
+* [Architecture](docs/ARCHITECTURE.md) — как устроена система и где проходят authority boundaries;
+* [Roadmap](docs/ROADMAP.md) — как проект движется от текущего состояния к vision.
 
 ---
 
@@ -267,7 +282,7 @@ src/household_supply/
 └── web/          # local browser surface
 ```
 
-Архитектурный принцип проекта — **core first, infrastructure second**.  
+Архитектурный принцип проекта — **core first, infrastructure second**.
 Domain/planning code не зависит от FastAPI, SQLAlchemy, PostgreSQL, retailer SDK или LLM SDK.
 
 ---
@@ -276,5 +291,5 @@ Domain/planning code не зависит от FastAPI, SQLAlchemy, PostgreSQL, r
 
 `Household Supply Planner` — рабочее техническое название; продуктовый бренд будет выбран позже.
 
-Репозиторий развивается milestone-by-milestone с явными invariants и regression tests.  
-Текущая цель — доказать удобный closed-loop household workflow прежде, чем добавлять более широкий AI/interface layer.
+Репозиторий развивается milestone-by-milestone с явными invariants и regression tests.
+Текущая цель — превратить доказанный closed-loop vertical slice в удобный real-use household workflow, прежде чем расширять AI/interface layer.

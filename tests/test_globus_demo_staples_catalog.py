@@ -92,7 +92,7 @@ def test_urls_are_globus_urls() -> None:
 def test_catalog_has_expected_minimum_size() -> None:
     catalog, listings = build_globus_demo_staples_catalog()
 
-    assert len(catalog.skus) >= 35
+    assert len(catalog.skus) >= 60
     assert len(catalog.bindings) == len(catalog.skus)
     assert len(listings) == len(catalog.skus)
 
@@ -113,6 +113,41 @@ def test_catalog_contains_core_staples() -> None:
         "eggs",
         "bread",
     } <= item_ids
+
+def test_catalog_covers_core_household_staples() -> None:
+    catalog, _ = build_globus_demo_staples_catalog()
+
+    item_ids = {sku.item.id for sku in catalog.skus}
+
+    required_items = {
+        "milk",
+        "pasta",
+        "sunflower_oil",
+        "semolina",
+        "canned_fish",
+        "canned_peas",
+        "seasoning",
+        "eggs",
+        "bread",
+        "sugar",
+        "rice",
+        "buckwheat",
+        "oatmeal",
+        "flour",
+        "salt",
+        "tea_bags",
+        "tea_loose",
+        "coffee",
+        "water",
+        "cottage_cheese",
+        "yogurt",
+        "cheese",
+        "sauce",
+        "cookies",
+        "breakfast_cereal",
+    }
+
+    assert required_items <= item_ids
 
 def test_package_metadata_is_explicit_in_sku_name() -> None:
     catalog, _ = build_globus_demo_staples_catalog()

@@ -613,7 +613,7 @@ def build_globus_demo_staples_catalog() -> tuple[
         _make_product(
             item_id="tea_bags",
             item_name="Чай в пакетиках",
-            category="tea",
+            category="tea_bags",
             sku_id="globus_tea_beta_mint_lemon_25",
             sku_name="Чай Beta Mint & Lemon 25шт",
             package_amount="25",
@@ -627,7 +627,7 @@ def build_globus_demo_staples_catalog() -> tuple[
         _make_product(
             item_id="tea_loose",
             item_name="Чай листовой",
-            category="tea",
+            category="tea_loose",
             sku_id="globus_tea_tess_flame_90g",
             sku_name="Чай Tess Flame клубн трав 90г",
             package_amount="90",
@@ -641,7 +641,7 @@ def build_globus_demo_staples_catalog() -> tuple[
         _make_product(
             item_id="tea_bags",
             item_name="Чай в пакетиках",
-            category="tea",
+            category="tea_bags",
             sku_id="globus_tea_polezny_pohudin_25",
             sku_name="Чай Полезный Похудин 25шт",
             package_amount="25",
@@ -655,7 +655,7 @@ def build_globus_demo_staples_catalog() -> tuple[
         _make_product(
             item_id="tea_bags",
             item_name="Чай в пакетиках",
-            category="tea",
+            category="tea_bags",
             sku_id="globus_tea_greenfield_classic_breakfast_25",
             sku_name="Чай Greenfield Classic Breakfast 25шт",
             package_amount="25",
@@ -724,6 +724,240 @@ def build_globus_demo_staples_catalog() -> tuple[
             url=(
                 "https://globus-online.kg/ru-kg/good/"
                 "1a78edd20bfb4b9bb8e24105874b82f0000200010000"
+            ),
+        ),
+
+                # Dairy
+        _make_product(
+            item_id="cottage_cheese",
+            item_name="Творог",
+            category="dairy",
+            sku_id="globus_cottage_cheese_savushkin_125g",
+            sku_name="Творог Савушкин мягкий нежный 0% 125г п/с РЦ",
+            package_amount="125",
+            package_unit="g",
+            brand="Савушкин",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "2395e406965544a5b44ce0fcc3141b46000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="yogurt",
+            item_name="Йогурт",
+            category="dairy",
+            sku_id="globus_yogurt_campina_100g",
+            sku_name="Йогурт Campina Нежный бан/клубн. 1,2% 100г 24",
+            package_amount="100",
+            package_unit="g",
+            brand="Campina",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "7bbaae900232454996dce89166a7085a000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="sour_cream_ml",
+            item_name="Сметана",
+            category="dairy",
+            sku_id="globus_sour_cream_umut_500ml",
+            sku_name="Сметана Умут и К 20% 500мл т/п",
+            package_amount="500",
+            package_unit="ml",
+            brand="Умут и Ко",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "c941d70f08e3430f89979e347360d58a000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="sour_cream_g",
+            item_name="Сметана",
+            category="dairy",
+            sku_id="globus_sour_cream_belaya_reka_170g",
+            sku_name="Сметана Белая Река 15% 170г Кант Сут",
+            package_amount="170",
+            package_unit="g",
+            brand="Белая Река",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "c000eaec6d8a47d5bcf3eb3939c5b3fe000300010001"
+            ),
+        ),
+
+        # Cheese
+        _make_product(
+            item_id="cheese",
+            item_name="Сыр",
+            category="cheese",
+            sku_id="globus_cheese_unagrande_mozzarella_100g",
+            sku_name="Сыр Unagrande Моцарелла Чильеджина с протеином 32% 100г",
+            package_amount="100",
+            package_unit="g",
+            brand="Unagrande",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "38e9441d86734ffe91ed17e6d3eb46f5000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="cheese",
+            item_name="Сыр",
+            category="cheese",
+            sku_id="globus_cheese_president_collection_140g",
+            sku_name="Сыр President Сырная Коллекция 8 долек 140г",
+            package_amount="140",
+            package_unit="g",
+            brand="President",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "18b5518e491c46389102dfc1ad88c7d6000200010000"
+            ),
+        ),
+        _make_product(
+            item_id="cheese",
+            item_name="Сыр",
+            category="cheese",
+            sku_id="globus_cheese_hochland_fetaxa_200g",
+            sku_name="Сыр Hochland Фетакса 200г",
+            package_amount="200",
+            package_unit="g",
+            brand="Hochland",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "66be8fdec8974ae993a5704152187ca2000200010000"
+            ),
+        ),
+
+        # Sauces
+        _make_product(
+            item_id="sauce",
+            item_name="Соус",
+            category="sauces",
+            sku_id="globus_sauce_abc_mustard_160g",
+            sku_name="Горчица ABC душистая 160г ст/б",
+            package_amount="160",
+            package_unit="g",
+            brand="ABC",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "d50ddb7949244271ac13fc08da894076000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="sauce",
+            item_name="Соус",
+            category="sauces",
+            sku_id="globus_sauce_sloboda_ketchup_300g",
+            sku_name="Кетчуп Слобода шашлычный 300г доз",
+            package_amount="300",
+            package_unit="g",
+            brand="Слобода",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "a073367a0fb249539e0c50c8e61a6c04000200010000"
+            ),
+        ),
+        _make_product(
+            item_id="sauce",
+            item_name="Соус",
+            category="sauces",
+            sku_id="globus_sauce_3_zhelaniya_mayonnaise_700g",
+            sku_name="Майонез 3 желания Провансаль классический 50,5% 700г д/п",
+            package_amount="700",
+            package_unit="g",
+            brand="3 желания",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "cb299cc8ea824df085b846faba495a9c000300010001"
+            ),
+        ),
+
+        # Cookies
+        _make_product(
+            item_id="cookies",
+            item_name="Печенье",
+            category="cookies",
+            sku_id="globus_cookies_present_vdohnovenie_600g",
+            sku_name="Печенье Презент Вдохновение 600г",
+            package_amount="600",
+            package_unit="g",
+            brand="Презент",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "a50c4183432044739305333044b3c695000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="cookies",
+            item_name="Печенье",
+            category="cookies",
+            sku_id="globus_cookies_sladonezh_310g",
+            sku_name="Печенье Сладонеж к кофе мол 310г",
+            package_amount="310",
+            package_unit="g",
+            brand="Сладонеж",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "231862552151412b9132d28c1673bbc9000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="cookies",
+            item_name="Печенье",
+            category="cookies",
+            sku_id="globus_cookies_sladial_870g",
+            sku_name="Печенье Сладиал к кофе сахарн 870г",
+            package_amount="870",
+            package_unit="g",
+            brand="Сладиал",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "4c8ef3b63c1b44f1a15068a1b3f61caa000200010001"
+            ),
+        ),
+
+        # Breakfast cereals
+        _make_product(
+            item_id="breakfast_cereal",
+            item_name="Хлопья и готовые завтраки",
+            category="cereals",
+            sku_id="globus_cereal_goodwill_350g",
+            sku_name="Хлопья пшенно-кукурузные Гудвилл 350г кор",
+            package_amount="350",
+            package_unit="g",
+            brand="Гудвилл",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "bc0d6846e23a464793e8d9e3d2dc8582000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="breakfast_cereal",
+            item_name="Хлопья и готовые завтраки",
+            category="cereals",
+            sku_id="globus_cereal_hrutka_210g",
+            sku_name="Готов.завтрак Хрутка клубн-ванильн.настроение 210г",
+            package_amount="210",
+            package_unit="g",
+            brand="Хрутка",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "29b2c7b93a9342c2ad48419cd1db6640000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="breakfast_cereal",
+            item_name="Хлопья и готовые завтраки",
+            category="cereals",
+            sku_id="globus_cereal_nesquik_lodochki_210g",
+            sku_name="Готов.завтрак Nesquik Лодочки 210г",
+            package_amount="210",
+            package_unit="g",
+            brand="Nesquik",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "73a3ded08e5743059cd61e782b0ed223000300010001"
             ),
         ),
     )

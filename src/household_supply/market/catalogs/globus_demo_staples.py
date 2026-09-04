@@ -389,6 +389,343 @@ def build_globus_demo_staples_catalog() -> tuple[
                 "82c4833f00064ce7b531521ffb468dec000300010001"
             ),
         ),
+                # Rice
+        _make_product(
+            item_id="rice",
+            item_name="Рис",
+            category="rice",
+            sku_id="globus_rice_passim_500g",
+            sku_name="Рис Пассим круглозерн.пак. 500г",
+            package_amount="500",
+            package_unit="g",
+            brand="Пассим",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "cd7c9e84529f4d3a84c0fb1ab878980e000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="rice",
+            item_name="Рис",
+            category="rice",
+            sku_id="globus_rice_no1_pakistani_900g",
+            sku_name="Рис №1 Пакистанский 900г PL1",
+            package_amount="900",
+            package_unit="g",
+            brand="№1",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "2967cc423f384a57ac4a6ef7dceb0f7c000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="rice",
+            item_name="Рис",
+            category="rice",
+            sku_id="globus_rice_no1_krasnodar_400g",
+            sku_name="Рис №1 Краснодарский круглозерн ТУ 400г PL1",
+            package_amount="400",
+            package_unit="g",
+            brand="№1",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "921cc5ab5eec47c487c8f31fff8ee83d000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="rice",
+            item_name="Рис",
+            category="rice",
+            sku_id="globus_rice_no1_sechka_400g",
+            sku_name="Рис №1 Сечка 400г PL1",
+            package_amount="400",
+            package_unit="g",
+            brand="№1",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "e74f62750b784bdc847d6082c2e1ff31000100010000"
+            ),
+        ),
+
+        # Buckwheat
+        _make_product(
+            item_id="buckwheat",
+            item_name="Гречка",
+            category="cereals",
+            sku_id="globus_buckwheat_uvelka_800g",
+            sku_name="Гречка Увелка Экстра быстроразвар. 800г",
+            package_amount="800",
+            package_unit="g",
+            brand="Увелка",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "a4592fa805fe4d77acfd5be2d619d098000200010000"
+            ),
+        ),
+        _make_product(
+            item_id="buckwheat",
+            item_name="Гречка",
+            category="cereals",
+            sku_id="globus_buckwheat_tsar_800g",
+            sku_name="Гречка Царь 800г",
+            package_amount="800",
+            package_unit="g",
+            brand="Царь",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "a3cc836537f847379b805095aaaef0e5000200010000"
+            ),
+        ),
+        _make_product(
+            item_id="buckwheat",
+            item_name="Гречка",
+            category="cereals",
+            sku_id="globus_buckwheat_makfa_400g",
+            sku_name="Гречка Макфа ядрица пак. 400г кор",
+            package_amount="400",
+            package_unit="g",
+            brand="Макфа",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "ac51ea486a2749e7bb36620b0e460fa1000100010000"
+            ),
+        ),
+
+        # Oatmeal
+        _make_product(
+            item_id="oatmeal",
+            item_name="Овсянка",
+            category="cereals",
+            sku_id="globus_oatmeal_uvelka_400g",
+            sku_name="Хлопья Увелка овсяные Геркулес 400г д/п",
+            package_amount="400",
+            package_unit="g",
+            brand="Увелка",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "c78f8dc6f4954fc9b2708d95cd43b053000200010000"
+            ),
+        ),
+        _make_product(
+            item_id="oatmeal",
+            item_name="Овсянка",
+            category="cereals",
+            sku_id="globus_oatmeal_makfa_350g",
+            sku_name="Хлопья Макфа Овсяные 350г",
+            package_amount="350",
+            package_unit="g",
+            brand="Макфа",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "5f7a55b637c54c70a1fb9acab8d7e5e7000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="oatmeal",
+            item_name="Овсянка",
+            category="cereals",
+            sku_id="globus_oatmeal_makfa_400g",
+            sku_name="Хлопья Макфа овсяные 400г кор",
+            package_amount="400",
+            package_unit="g",
+            brand="Макфа",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "13ab8b9f751c476b8afe817e87b976a3000200010001"
+            ),
+        ),
+
+        # Flour
+        _make_product(
+            item_id="flour",
+            item_name="Мука",
+            category="flour",
+            sku_id="globus_flour_astyk_2kg",
+            sku_name="Мука Астык в/с 2кг",
+            package_amount="2",
+            package_unit="kg",
+            brand="Астык",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "02a079571ae24028afbf493f5983426d000200010001"
+            ),
+        ),
+        _make_product(
+            item_id="flour",
+            item_name="Мука",
+            category="flour",
+            sku_id="globus_flour_orion_1kg",
+            sku_name="Мука Orion в/с 1кг",
+            package_amount="1",
+            package_unit="kg",
+            brand="Orion",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "28b6ec6abf404513925269523ce338b8000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="flour",
+            item_name="Мука",
+            category="flour",
+            sku_id="globus_flour_ramenskaya_2kg",
+            sku_name="Мука Раменская пшен хлебопекар в/с 2кг",
+            package_amount="2",
+            package_unit="kg",
+            brand="Раменская",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "0db995db93154eddbec63a13e50db437000100010000"
+            ),
+        ),
+
+        # Salt
+        _make_product(
+            item_id="salt",
+            item_name="Соль",
+            category="salt",
+            sku_id="globus_salt_extra_1kg",
+            sku_name="Соль Экстра пищевая йодиров. 1кг",
+            package_amount="1",
+            package_unit="kg",
+            brand="Экстра",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "7450931f8f0a4b3eb09cbbe4db4a5c63000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="salt",
+            item_name="Соль",
+            category="salt",
+            sku_id="globus_salt_araltuz_1kg",
+            sku_name="Соль пищевая Аралтуз 1 кг",
+            package_amount="1",
+            package_unit="kg",
+            brand="Аралтуз",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "558ffe164bc345969f581c44e4d7430a000100010000"
+            ),
+        ),
+
+                # Tea
+        _make_product(
+            item_id="tea_bags",
+            item_name="Чай в пакетиках",
+            category="tea",
+            sku_id="globus_tea_beta_mint_lemon_25",
+            sku_name="Чай Beta Mint & Lemon 25шт",
+            package_amount="25",
+            package_unit="piece",
+            brand="Beta",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "b9ce1fb0f3ea46218b372010613aec90000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="tea_loose",
+            item_name="Чай листовой",
+            category="tea",
+            sku_id="globus_tea_tess_flame_90g",
+            sku_name="Чай Tess Flame клубн трав 90г",
+            package_amount="90",
+            package_unit="g",
+            brand="Tess",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "73ec099c392d4eac8f6f61d0cad889cb000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="tea_bags",
+            item_name="Чай в пакетиках",
+            category="tea",
+            sku_id="globus_tea_polezny_pohudin_25",
+            sku_name="Чай Полезный Похудин 25шт",
+            package_amount="25",
+            package_unit="piece",
+            brand="Полезный",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "69cb431cb8484a449d5c0f74d0217047000100010000"
+            ),
+        ),
+        _make_product(
+            item_id="tea_bags",
+            item_name="Чай в пакетиках",
+            category="tea",
+            sku_id="globus_tea_greenfield_classic_breakfast_25",
+            sku_name="Чай Greenfield Classic Breakfast 25шт",
+            package_amount="25",
+            package_unit="piece",
+            brand="Greenfield",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "27d81f26ce6540979c4c9ca5598f546a000200010000"
+            ),
+        ),
+
+        # Coffee
+        _make_product(
+            item_id="coffee",
+            item_name="Кофе",
+            category="coffee",
+            sku_id="globus_coffee_nescafe_gold_85g",
+            sku_name="Кофе Nescafe Gold Alta Rica раств 85г ст/б",
+            package_amount="85",
+            package_unit="g",
+            brand="Nescafe",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "19720e5383334b5b9b72e637716b70e3000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="coffee",
+            item_name="Кофе",
+            category="coffee",
+            sku_id="globus_coffee_jockey_vostochnyi_250g",
+            sku_name="Кофе Жокей По-восточному молот. 250г в/у",
+            package_amount="250",
+            package_unit="g",
+            brand="Жокей",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "7324d34013424a7fbe11a598585d562b000300010001"
+            ),
+        ),
+        _make_product(
+            item_id="coffee",
+            item_name="Кофе",
+            category="coffee",
+            sku_id="globus_coffee_jacobs_monarch_230g",
+            sku_name="Кофе Jacobs Monarch в зёрнах 230г д/п",
+            package_amount="230",
+            package_unit="g",
+            brand="Jacobs",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "38b8105ae92244d287da7f363c1e161b000200010001"
+            ),
+        ),
+
+        # Water
+        _make_product(
+            item_id="water",
+            item_name="Вода",
+            category="water",
+            sku_id="globus_water_corona_ice_10l",
+            sku_name="Вода д/кулера Corona Ice 10л Кыргызстан",
+            package_amount="10",
+            package_unit="l",
+            brand="Corona Ice",
+            url=(
+                "https://globus-online.kg/ru-kg/good/"
+                "1a78edd20bfb4b9bb8e24105874b82f0000200010000"
+            ),
+        ),
     )
 
     skus = tuple(product[1] for product in products)

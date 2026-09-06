@@ -10,6 +10,7 @@ from household_supply.application import (
     HouseholdClosedLoopJsonApi,
     HouseholdReplenishmentService,
     InMemoryPlanRepository,
+    LocalDataResetService,
     PlanApplicationService,
     PlanLifecycleService,
 )
@@ -67,10 +68,15 @@ def make_web_app() -> HouseholdLocalWebApp:
     )
     provider = StaticMarketProvider(MarketAcquisitionBatch("fixture", NOW, observations))
     planner = PlanApplicationService(catalog, (provider,), clock=lambda: NOW)
-    plans = PlanLifecycleService(planner, InMemoryPlanRepository(), clock=lambda: NOW)
-    household = HouseholdLearningService(InMemoryHouseholdEventRepository())
+    plan_repository = InMemoryPlanRepository()
+    household_repository = InMemoryHouseholdEventRepository()
+    plans = PlanLifecycleService(planner, plan_repository, clock=lambda: NOW)
+    household = HouseholdLearningService(household_repository)
     replenishment = HouseholdReplenishmentService(household, plans, clock=lambda: NOW)
-    api = HouseholdWebJsonApi(HouseholdClosedLoopJsonApi(replenishment), catalog)
+    reset_service = LocalDataResetService(household, plan_repository)
+    api = HouseholdWebJsonApi(
+        HouseholdClosedLoopJsonApi(replenishment), catalog, reset_service
+    )
     return HouseholdLocalWebApp(api)
 
 
@@ -158,6 +164,8 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     for legacy in ("Extra needs", "Horizon, days", "Record a stocktake", "Depletion evidence", "Build replenishment plan"):
         assert legacy not in text
     assert '<script src="/assets/app.js" defer></script>' in text
+    assert '<script src="/assets/reset.js" defer></script>' in text
+    assert "Сбросить все данные" in text
     assert "<script>" not in text
 
     js_start, js_body = asyncio.run(asgi_request(app, method="GET", path="/assets/app.js"))
@@ -169,6 +177,11 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert b"formEventId" in js_body["body"]
     assert b".style" not in js_body["body"]
 
+    reset_start, reset_body = asyncio.run(
+        asgi_request(app, method="GET", path="/assets/reset.js")
+    )
+    assert reset_start["status"] == 200
+    assert b"/local-data/reset" in reset_body["body"]
 
 def test_local_web_head_and_static_route_policy() -> None:
     app = make_web_app()
@@ -244,6 +257,44 @@ def test_browser_surface_runs_stocktake_plan_and_purchase_confirmation() -> None
     confirmed = json.loads(body["body"])
     assert confirmed["purchase"]["actual_packs"] == 1
     assert confirmed["purchase"]["planned_packs"] == 1
+
+
+def test_local_data_reset_requires_confirmation_and_clears_household_and_plans() -> None:
+    app = make_web_app()
+    stocktake = {
+        "event_id": "reset-stocktake",
+        "item_id": "milk",
+        "quantity": {"amount": "2", "unit": "l"},
+        "reason": "test",
+    }
+    assert app.api.handle("POST", "/household/stocktakes", stocktake).status == 201
+    plan = {
+        "budget": {"amount": "1000", "currency": "KGS"},
+        "horizon_days": "7",
+        "explicit_needs": [
+            {"item_id": "milk", "quantity": {"amount": "3", "unit": "l"}}
+        ],
+    }
+    assert app.api.handle("POST", "/plans", plan).status == 201
+
+    rejected = app.api.handle(
+        "POST", "/local-data/reset", {"confirmation": "no"}
+    )
+    assert rejected.status == 422
+    assert app.api.handle("GET", "/household/history").body["event_count"] == 1
+
+    response = app.api.handle(
+        "POST", "/local-data/reset", {"confirmation": "RESET"}
+    )
+    assert response.status == 200
+    assert response.body["reset"] == {
+        "household_events_deleted": 1,
+        "plans_deleted": 1,
+    }
+
+    assert app.api.handle("GET", "/household/history").body["event_count"] == 0
+    assert app.api.handle("GET", "/household/state").body["household"]["balances"] == []
+    assert app.api.handle("GET", "/plans?limit=10").body["plans"] == []
 
 
 

@@ -120,6 +120,9 @@ _ASSETS = {
     "/assets/app.js": _StaticAsset(
         "app.js", b"text/javascript; charset=utf-8", b"no-cache"
     ),
+    "/assets/reset.js": _StaticAsset(
+        "reset.js", b"text/javascript; charset=utf-8", b"no-cache"
+    ),
     "/assets/styles.css": _StaticAsset(
         "styles.css", b"text/css; charset=utf-8", b"no-cache"
     ),

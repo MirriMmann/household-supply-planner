@@ -288,6 +288,8 @@ class PlanRepository(Protocol):
 
     def list_recent(self, limit: int) -> tuple[PlanRecord, ...]: ...
 
+    def clear(self) -> int: ...
+
 
 class InMemoryPlanRepository:
     """Process-local repository useful for embedding and deterministic tests."""
@@ -311,6 +313,11 @@ class InMemoryPlanRepository:
             reverse=True,
         )
         return tuple(records[:limit])
+
+    def clear(self) -> int:
+        count = len(self._records)
+        self._records.clear()
+        return count
 
 
 def _validate_limit(limit: int) -> None:
@@ -456,3 +463,28 @@ class FilePlanRepository:
             reverse=True,
         )
         return tuple(records[:limit])
+
+    def clear(self) -> int:
+        """Delete published plan records without touching unrelated files."""
+
+        try:
+            paths = tuple(self.root.glob("*.json"))
+        except OSError as exc:
+            raise PlanRepositoryError("cannot list plan repository for reset") from exc
+
+        deleted = 0
+        for path in paths:
+            try:
+                if not path.is_file() and not path.is_symlink():
+                    raise PlanRepositoryError(
+                        f"cannot reset non-file plan record: {path.name}"
+                    )
+                path.unlink()
+                deleted += 1
+            except PlanRepositoryError:
+                raise
+            except OSError as exc:
+                raise PlanRepositoryError(
+                    f"cannot delete plan record during reset: {path.name}"
+                ) from exc
+        return deleted

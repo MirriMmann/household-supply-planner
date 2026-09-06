@@ -23,6 +23,7 @@ from household_supply.application import (
     PlanApplicationService,
     PlanLifecycleService,
     HouseholdReplenishmentService,
+    LocalDataResetService,
 )
 from household_supply.domain import (
     CatalogBinding,
@@ -110,12 +111,14 @@ def _build_web_app(
     planner,
     allow_remote_hosts: bool = False,
 ) -> HouseholdLocalWebApp:
-    household = HouseholdLearningService(
-        FileHouseholdEventRepository(data_dir / "household-events")
+    household_repository = FileHouseholdEventRepository(
+        data_dir / "household-events"
     )
+    plan_repository = FilePlanRepository(data_dir / "plans")
+    household = HouseholdLearningService(household_repository)
     lifecycle = PlanLifecycleService(
         planner,
-        FilePlanRepository(data_dir / "plans"),
+        plan_repository,
         clock=utc_now,
     )
     replenishment = HouseholdReplenishmentService(
@@ -124,7 +127,8 @@ def _build_web_app(
         clock=utc_now,
     )
     closed_loop = HouseholdClosedLoopJsonApi(replenishment)
-    web_api = HouseholdWebJsonApi(closed_loop, catalog)
+    reset_service = LocalDataResetService(household, plan_repository)
+    web_api = HouseholdWebJsonApi(closed_loop, catalog, reset_service)
     return HouseholdLocalWebApp(web_api, allow_non_loopback_hosts=allow_remote_hosts)
 
 

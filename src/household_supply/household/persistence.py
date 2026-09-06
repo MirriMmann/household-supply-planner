@@ -293,6 +293,8 @@ class HouseholdEventRepository(Protocol):
 
     def history(self) -> HouseholdHistory: ...
 
+    def clear(self) -> int: ...
+
 
 class InMemoryHouseholdEventRepository:
     def __init__(self) -> None:
@@ -314,6 +316,11 @@ class InMemoryHouseholdEventRepository:
             key=lambda event: (event.recorded_at, event.event_id.value),
         )
         return HouseholdHistory(tuple(events))
+
+    def clear(self) -> int:
+        count = len(self._events)
+        self._events.clear()
+        return count
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,3 +464,30 @@ class FileHouseholdEventRepository:
                 events.append(event)
         events.sort(key=lambda event: (event.recorded_at, event.event_id.value))
         return HouseholdHistory(tuple(events))
+
+    def clear(self) -> int:
+        """Delete published event records without touching unrelated files."""
+
+        try:
+            paths = tuple(self.root.glob("*.json"))
+        except OSError as exc:
+            raise HouseholdEventRepositoryError(
+                "cannot list household event repository for reset"
+            ) from exc
+
+        deleted = 0
+        for path in paths:
+            try:
+                if not path.is_file() and not path.is_symlink():
+                    raise HouseholdEventRepositoryError(
+                        f"cannot reset non-file household record: {path.name}"
+                    )
+                path.unlink()
+                deleted += 1
+            except HouseholdEventRepositoryError:
+                raise
+            except OSError as exc:
+                raise HouseholdEventRepositoryError(
+                    f"cannot delete household event during reset: {path.name}"
+                ) from exc
+        return deleted

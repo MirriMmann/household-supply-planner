@@ -71,8 +71,16 @@ from .replenishment_api import (
     parse_household_replenishment_payload,
     serialize_household_replenishment_result,
 )
+from .reset import (
+    LocalDataResetError,
+    LocalDataResetResult,
+    LocalDataResetService,
+)
 
 __all__ = [
+    "LocalDataResetError",
+    "LocalDataResetResult",
+    "LocalDataResetService",
     "HouseholdClosedLoopJsonApi",
     "HouseholdOperationConflictError",
     "HouseholdOperationError",

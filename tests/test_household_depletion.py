@@ -241,3 +241,35 @@ def test_estimate_all_depletion_is_sorted() -> None:
         "milk",
         "rice",
     )
+
+def test_very_short_stocktake_window_is_not_used_for_learning() -> None:
+    history = HouseholdHistory(
+        (
+            count("start", "2000", BASE),
+            count(
+                "end",
+                "0",
+                BASE + timedelta(minutes=10),
+            ),
+        )
+    )
+
+    report = depletion_learning_report(history, "milk")
+    assert report is not None
+    assert len(report.windows) == 1
+
+    window = report.windows[0]
+
+    assert window.inferred_depletion == Quantity("2000", "ml")
+    assert not window.accepted_for_learning
+    assert report.estimate is None
+
+    assert report is not None
+    assert len(report.windows) == 1
+
+    window = report.windows[0]
+
+    assert window.inferred_depletion == Quantity("2000", "ml")
+
+    assert not window.accepted_for_learning
+    assert report.estimate is None

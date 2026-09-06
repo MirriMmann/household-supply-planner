@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 
@@ -16,6 +16,8 @@ from .learning import (
     UsageRateSample,
     estimate_usage_rate,
 )
+
+MIN_LEARNING_WINDOW = timedelta(hours=24)
 
 
 class DepletionWindowStatus(str, Enum):
@@ -106,6 +108,9 @@ class StocktakeDepletionWindow:
 
     @property
     def accepted_for_learning(self) -> bool:
+        if self.period_end - self.period_start < MIN_LEARNING_WINDOW:
+            return False
+
         return self.status in {
             DepletionWindowStatus.USED,
             DepletionWindowStatus.ZERO_DEPLETION,

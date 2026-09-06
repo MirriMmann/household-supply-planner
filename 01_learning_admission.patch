@@ -1,0 +1,446 @@
+diff --git a/src/household_supply/household/admission.py b/src/household_supply/household/admission.py
+new file mode 100644
+--- /dev/null
++++ b/src/household_supply/household/admission.py
+@@ -0,0 +1,110 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from enum import StrEnum
++
++from .depletion import DepletionLearningReport, depletion_learning_reports
++from .history import HouseholdHistory
++from .learning import ConsumptionEstimate
++
++
++MICROSECONDS_PER_DAY = 86_400_000_000
++MIN_RECURRING_SAMPLE_COUNT = 2
++MIN_RECURRING_OBSERVED_MICROSECONDS = 2 * MICROSECONDS_PER_DAY
++
++
++class RecurringAdmissionStatus(StrEnum):
++    INSUFFICIENT = "insufficient"
++    PROVISIONAL = "provisional"
++    ACCEPTED = "accepted"
++
++
++@dataclass(frozen=True, slots=True)
++class RecurringEstimateAdmission:
++    """Decision about whether a descriptive rate may drive future recurring demand.
++
++    ``ConsumptionEstimate`` answers a descriptive arithmetic question:
++    "what rate do these observations imply if taken literally?"
++
++    This type answers a different product question:
++    "is there enough independent evidence to extrapolate that rate into the future?"
++    """
++
++    item_id: str
++    status: RecurringAdmissionStatus
++    estimate: ConsumptionEstimate | None
++    reasons: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        item_id = self.item_id.strip()
++        reasons = tuple(self.reasons)
++        if not item_id:
++            raise ValueError("recurring admission item_id must not be empty")
++        if self.estimate is not None and self.estimate.item.id != item_id:
++            raise ValueError("recurring admission estimate Item does not match item_id")
++        if self.status is RecurringAdmissionStatus.ACCEPTED and self.estimate is None:
++            raise ValueError("accepted recurring admission requires an estimate")
++        if self.status is RecurringAdmissionStatus.INSUFFICIENT and self.estimate is not None:
++            raise ValueError("insufficient recurring admission must not expose an estimate")
++        if self.status is RecurringAdmissionStatus.ACCEPTED and reasons:
++            raise ValueError("accepted recurring admission must not contain rejection reasons")
++        object.__setattr__(self, "item_id", item_id)
++        object.__setattr__(self, "reasons", reasons)
++
++    @property
++    def accepted_estimate(self) -> ConsumptionEstimate | None:
++        if self.status is not RecurringAdmissionStatus.ACCEPTED:
++            return None
++        return self.estimate
++
++
++def admit_recurring_estimate(
++    report: DepletionLearningReport,
++) -> RecurringEstimateAdmission:
++    """Admit only evidence that is sufficiently broad for automatic extrapolation.
++
++    The policy is intentionally generic and conservative. It does not contain
++    product-specific limits such as "milk may not exceed X litres/day".
++    """
++
++    estimate = report.estimate
++    if estimate is None:
++        return RecurringEstimateAdmission(
++            item_id=report.item.id,
++            status=RecurringAdmissionStatus.INSUFFICIENT,
++            estimate=None,
++            reasons=("no_positive_rate_estimate",),
++        )
++
++    reasons: list[str] = []
++    if estimate.sample_count < MIN_RECURRING_SAMPLE_COUNT:
++        reasons.append("requires_multiple_independent_samples")
++    if estimate.observed_microseconds < MIN_RECURRING_OBSERVED_MICROSECONDS:
++        reasons.append("requires_at_least_two_observed_days")
++
++    if reasons:
++        return RecurringEstimateAdmission(
++            item_id=report.item.id,
++            status=RecurringAdmissionStatus.PROVISIONAL,
++            estimate=estimate,
++            reasons=tuple(reasons),
++        )
++
++    return RecurringEstimateAdmission(
++        item_id=report.item.id,
++        status=RecurringAdmissionStatus.ACCEPTED,
++        estimate=estimate,
++    )
++
++
++def admitted_recurring_estimates(
++    history: HouseholdHistory,
++    *,
++    as_of=None,
++) -> tuple[ConsumptionEstimate, ...]:
++    accepted: list[ConsumptionEstimate] = []
++    for report in depletion_learning_reports(history, as_of=as_of):
++        estimate = admit_recurring_estimate(report).accepted_estimate
++        if estimate is not None:
++            accepted.append(estimate)
++    return tuple(accepted)
+diff --git a/src/household_supply/household/__init__.py b/src/household_supply/household/__init__.py
+--- a/src/household_supply/household/__init__.py
++++ b/src/household_supply/household/__init__.py
+@@ -1,3 +1,11 @@
++from .admission import (
++    MIN_RECURRING_OBSERVED_MICROSECONDS,
++    MIN_RECURRING_SAMPLE_COUNT,
++    RecurringAdmissionStatus,
++    RecurringEstimateAdmission,
++    admit_recurring_estimate,
++    admitted_recurring_estimates,
++)
+ from .depletion import (
+     DepletionEstimationError,
+     DepletionLearningReport,
+@@ -44,3 +53,9 @@ __all__ = [
++    "MIN_RECURRING_OBSERVED_MICROSECONDS",
++    "MIN_RECURRING_SAMPLE_COUNT",
++    "RecurringAdmissionStatus",
++    "RecurringEstimateAdmission",
++    "admit_recurring_estimate",
++    "admitted_recurring_estimates",
+     "DepletionEstimationError",
+     "DepletionLearningReport",
+     "DepletionWindowStatus",
+diff --git a/src/household_supply/application/replenishment.py b/src/household_supply/application/replenishment.py
+--- a/src/household_supply/application/replenishment.py
++++ b/src/household_supply/application/replenishment.py
+@@ -20,6 +20,6 @@ from household_supply.household import (
+     HouseholdLearningService,
+     HouseholdState,
+     RecurringNeedSource,
+-    estimate_all_depletion,
++    admitted_recurring_estimates,
+     project_household_state,
+ )
+@@ -87,8 +87,8 @@ class HouseholdReplenishmentPreparation:
+         if self.state != expected_state:
+             raise ValueError(
+                 "household replenishment state does not match history/as_of basis"
+             )
+-        expected_estimates = estimate_all_depletion(self.history, as_of=self.as_of)
++        expected_estimates = admitted_recurring_estimates(self.history, as_of=self.as_of)
+         if estimates != expected_estimates:
+             raise ValueError(
+                 "household replenishment estimates do not match history/as_of basis"
+@@ -214,7 +214,7 @@ class HouseholdReplenishmentService:
+         _require_aware(as_of, label="household replenishment as_of")
+         history = self.household.history()
+         state = project_household_state(history, as_of=as_of)
+-        estimates = estimate_all_depletion(history, as_of=as_of)
++        estimates = admitted_recurring_estimates(history, as_of=as_of)
+         compilation, application_request = _compile_replenishment_inputs(
+             request,
+             self.plans.planner.catalog,
+diff --git a/src/household_supply/application/household_operations_api.py b/src/household_supply/application/household_operations_api.py
+--- a/src/household_supply/application/household_operations_api.py
++++ b/src/household_supply/application/household_operations_api.py
+@@ -12,4 +12,5 @@ from household_supply.household import (
+     HouseholdProjectionError,
+     HouseholdState,
++    admit_recurring_estimate,
+     serialize_household_event,
+ )
+@@ -137,9 +138,14 @@ def _serialize_estimate(estimate) -> dict[str, Any] | None:
+ 
+ 
+ def serialize_depletion_report(report: DepletionLearningReport) -> dict[str, Any]:
++    admission = admit_recurring_estimate(report)
+     return {
+         "item_id": report.item.id,
+         "estimate": _serialize_estimate(report.estimate),
++        "recurring_admission": {
++            "status": admission.status.value,
++            "reasons": list(admission.reasons),
++        },
+         "direct_observation_ids_used": list(report.direct_observation_ids_used),
+         "direct_observation_ids_shadowed": list(
+             report.direct_observation_ids_shadowed
+diff --git a/src/household_supply/web/assets/app.js b/src/household_supply/web/assets/app.js
+--- a/src/household_supply/web/assets/app.js
++++ b/src/household_supply/web/assets/app.js
+@@ -392,10 +392,13 @@ function renderHome() {
+ 
+     const hint = document.createElement("p");
+     hint.className = "home-learning-hint";
+-    if (report?.estimate) {
++    const recurringReady = report?.recurring_admission?.status === "accepted";
++    if (report?.estimate && recurringReady) {
+       hint.textContent = `Обычно заканчивается примерно по ${humanQuantity(report.estimate.daily_quantity)} в день.`;
++    } else if (report?.estimate) {
++      hint.textContent = "Есть первые данные о расходе, но пока рано использовать их для прогноза.";
+     } else if (balance) {
+-      hint.textContent = "Обновите остаток позже ещё раз — и система начнёт понимать, как быстро это заканчивается.";
++      hint.textContent = "Обновите остаток позже ещё раз — система собирает данные о том, как быстро это заканчивается.";
+     } else {
+       hint.textContent = "Выберите примерно, сколько сейчас осталось.";
+     }
+@@ -498,12 +501,17 @@ function renderLearning() {
+     const name = document.createElement("strong");
+     name.textContent = `${itemEmoji(report.item_id)} ${itemName(report.item_id)}`;
+     const rate = document.createElement("span");
+-    rate.textContent = report.estimate ? `${humanQuantity(report.estimate.daily_quantity)} / день` : "Нужно больше данных";
++    const recurringReady = report?.recurring_admission?.status === "accepted";
++    rate.textContent = report.estimate && recurringReady
++      ? `${humanQuantity(report.estimate.daily_quantity)} / день`
++      : "Нужно больше данных";
+     row.append(name, rate);
+     const note = document.createElement("small");
+-    note.textContent = report.estimate
++    note.textContent = report.estimate && recurringReady
+       ? `Учтены наблюдения примерно за ${displayNumber(report.estimate.observed_days)} дн.`
+-      : "После следующего обновления остатка система попробует оценить расход.";
++      : report.estimate
++        ? "Есть предварительная оценка, но она пока не влияет на будущие покупки."
++        : "После следующих обновлений остатка система попробует оценить обычный расход.";
+     card.append(row, note);
+     list.appendChild(card);
+   }
+diff --git a/tests/test_household_admission.py b/tests/test_household_admission.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_household_admission.py
+@@ -0,0 +1,129 @@
++from __future__ import annotations
++
++from datetime import datetime, timedelta, timezone
++
++from household_supply.domain import Item, Quantity
++from household_supply.household import (
++    ConsumptionObservation,
++    HouseholdEventId,
++    HouseholdHistory,
++    InventoryCorrection,
++    RecurringAdmissionStatus,
++    admit_recurring_estimate,
++    admitted_recurring_estimates,
++    depletion_learning_report,
++)
++
++
++UTC = timezone.utc
++BASE = datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
++MILK = Item("milk", "Milk", "dairy")
++
++
++def use(event_id: str, amount: str, start: datetime, end: datetime):
++    return ConsumptionObservation(
++        HouseholdEventId(event_id),
++        MILK,
++        Quantity(amount, "ml"),
++        start,
++        end,
++        end,
++    )
++
++
++def count(event_id: str, amount: str, at: datetime):
++    return InventoryCorrection(
++        HouseholdEventId(event_id),
++        MILK,
++        Quantity(amount, "ml"),
++        at,
++        at,
++        "stocktake",
++    )
++
++
++def test_no_positive_rate_is_insufficient_for_recurring_demand() -> None:
++    history = HouseholdHistory(
++        (
++            count("d0", "1000", BASE),
++            count("d2", "1000", BASE + timedelta(days=2)),
++        )
++    )
++    report = depletion_learning_report(history, "milk")
++    assert report is not None
++    admission = admit_recurring_estimate(report)
++    assert admission.status is RecurringAdmissionStatus.INSUFFICIENT
++    assert admission.estimate is None
++    assert admission.accepted_estimate is None
++
++
++def test_one_long_sample_is_still_provisional() -> None:
++    history = HouseholdHistory(
++        (
++            use("u1", "600", BASE, BASE + timedelta(days=2)),
++        )
++    )
++    report = depletion_learning_report(history, "milk")
++    assert report is not None
++    assert report.estimate is not None
++    assert report.estimate.observed_days == 2
++    admission = admit_recurring_estimate(report)
++    assert admission.status is RecurringAdmissionStatus.PROVISIONAL
++    assert "requires_multiple_independent_samples" in admission.reasons
++    assert admission.accepted_estimate is None
++
++
++def test_two_independent_days_are_accepted() -> None:
++    history = HouseholdHistory(
++        (
++            use("u1", "300", BASE, BASE + timedelta(days=1)),
++            use(
++                "u2",
++                "500",
++                BASE + timedelta(days=1),
++                BASE + timedelta(days=2),
++            ),
++        )
++    )
++    report = depletion_learning_report(history, "milk")
++    assert report is not None
++    admission = admit_recurring_estimate(report)
++    assert admission.status is RecurringAdmissionStatus.ACCEPTED
++    assert admission.reasons == ()
++    assert admission.accepted_estimate == report.estimate
++
++
++def test_multiple_short_samples_remain_provisional() -> None:
++    first_end = BASE + timedelta(minutes=10)
++    second_start = BASE + timedelta(minutes=20)
++    second_end = BASE + timedelta(minutes=30)
++    history = HouseholdHistory(
++        (
++            use("u1", "1000", BASE, first_end),
++            use("u2", "1000", second_start, second_end),
++        )
++    )
++    report = depletion_learning_report(history, "milk")
++    assert report is not None
++    assert report.estimate is not None
++    admission = admit_recurring_estimate(report)
++    assert admission.status is RecurringAdmissionStatus.PROVISIONAL
++    assert "requires_at_least_two_observed_days" in admission.reasons
++    assert admission.accepted_estimate is None
++
++
++def test_bulk_admission_returns_only_accepted_estimates() -> None:
++    history = HouseholdHistory(
++        (
++            use("u1", "300", BASE, BASE + timedelta(days=1)),
++            use(
++                "u2",
++                "500",
++                BASE + timedelta(days=1),
++                BASE + timedelta(days=2),
++            ),
++        )
++    )
++    estimates = admitted_recurring_estimates(history)
++    assert len(estimates) == 1
++    assert estimates[0].item.id == "milk"
+diff --git a/tests/test_household_replenishment.py b/tests/test_household_replenishment.py
+--- a/tests/test_household_replenishment.py
++++ b/tests/test_household_replenishment.py
+@@ -183,6 +183,16 @@ def test_unknown_learned_item_fails_before_market_acquisition() -> None:
+             BASE + timedelta(days=1),
+         )
+     )
++    household.record(
++        ConsumptionObservation(
++            HouseholdEventId("ru2"),
++            rice,
++            Quantity("400", "g"),
++            BASE + timedelta(days=1),
++            BASE + timedelta(days=2),
++            BASE + timedelta(days=2),
++        )
++    )
+ 
+     class CountingProvider:
+         provider_id = "fixture"
+@@ -209,6 +220,32 @@ def test_empty_household_and_no_explicit_need_fails_before_market() -> None:
+         service.create(HouseholdReplenishmentRequest(Money(1000, "KGS"), 7))
+ 
+ 
++def test_provisional_recurring_evidence_does_not_drive_replenishment() -> None:
++    catalog, provider, items = catalog_and_provider(include_oil=False)
++    milk = items["milk"]
++    repo = InMemoryHouseholdEventRepository()
++    household = HouseholdLearningService(repo)
++    household.record(
++        PurchaseEvent(HouseholdEventId("p"), milk, Quantity("2", "l"), BASE, BASE)
++    )
++    household.record(
++        ConsumptionObservation(
++            HouseholdEventId("u"),
++            milk,
++            Quantity("500", "ml"),
++            BASE,
++            BASE + timedelta(days=1),
++            BASE + timedelta(days=1),
++        )
++    )
++    planner = PlanApplicationService(catalog, (provider,), clock=lambda: NOW)
++    lifecycle = PlanLifecycleService(planner, InMemoryPlanRepository(), clock=lambda: NOW)
++    service = HouseholdReplenishmentService(household, lifecycle, clock=lambda: NOW)
++
++    with pytest.raises(HouseholdReplenishmentRequestError, match="requires explicit"):
++        service.create(HouseholdReplenishmentRequest(Money(1000, "KGS"), 7))
++
++
+ def test_explicit_need_order_is_canonical_and_duplicates_rejected() -> None:
+     request = HouseholdReplenishmentRequest(
+         Money(1000, "KGS"),
+diff --git a/tests/test_household_depletion.py b/tests/test_household_depletion.py
+--- a/tests/test_household_depletion.py
++++ b/tests/test_household_depletion.py
+@@ -240,6 +240,7 @@ def test_estimate_all_depletion_is_sorted() -> None:
+         "rice",
+     )
+ 
++
+ def test_very_short_stocktake_window_is_not_used_for_learning() -> None:
+     history = HouseholdHistory(
+         (
+@@ -258,13 +259,3 @@ def test_very_short_stocktake_window_is_not_used_for_learning() -> None:
+     assert window.inferred_depletion == Quantity("2000", "ml")
+     assert not window.accepted_for_learning
+     assert report.estimate is None
+-
+-    assert report is not None
+-    assert len(report.windows) == 1
+-
+-    window = report.windows[0]
+-
+-    assert window.inferred_depletion == Quantity("2000", "ml")
+-
+-    assert not window.accepted_for_learning
+-    assert report.estimate is None

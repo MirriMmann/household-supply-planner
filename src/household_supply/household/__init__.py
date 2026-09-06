@@ -1,3 +1,10 @@
+from .admission import (
+    MIN_RECURRING_OBSERVED_MICROSECONDS,
+    RecurringAdmissionStatus,
+    RecurringEstimateAdmission,
+    admit_recurring_estimate,
+    admitted_recurring_estimates,
+)
 from .depletion import (
     DepletionEstimationError,
     DepletionLearningReport,
@@ -47,6 +54,11 @@ from .recurring import RECURRING_NEED_DECIMAL_PLACES, RecurringNeedSource
 from .service import HouseholdLearningService
 
 __all__ = [
+    "MIN_RECURRING_OBSERVED_MICROSECONDS",
+    "RecurringAdmissionStatus",
+    "RecurringEstimateAdmission",
+    "admit_recurring_estimate",
+    "admitted_recurring_estimates",
     "DepletionEstimationError",
     "DepletionLearningReport",
     "DepletionWindowStatus",

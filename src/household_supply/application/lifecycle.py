@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from household_supply.domain import CatalogBinding, ProductIdentifier, SKU
@@ -226,11 +226,15 @@ def build_plan_record(
     plan_id: PlanId,
     created_at: datetime,
     result,
+    decision_basis: Mapping[str, Any] | None = None,
 ) -> PlanRecord:
+    request_snapshot = serialize_plan_request(result.request)
+    if decision_basis is not None:
+        request_snapshot["decision_basis"] = dict(decision_basis)
     return PlanRecord.create(
         plan_id=plan_id,
         created_at=created_at,
-        request=serialize_plan_request(result.request),
+        request=request_snapshot,
         result=serialize_plan_result(result),
         market_evidence=serialize_market_evidence(result.market_compilation),
     )
@@ -249,7 +253,12 @@ class PlanLifecycleService:
         if not callable(self.id_factory):
             raise TypeError("plan lifecycle id_factory must be callable")
 
-    def create(self, request: ApplicationPlanRequest) -> PlanRecord:
+    def create(
+        self,
+        request: ApplicationPlanRequest,
+        *,
+        decision_basis: Mapping[str, Any] | None = None,
+    ) -> PlanRecord:
         plan_id = self.id_factory()
         if not isinstance(plan_id, PlanId):
             raise TypeError("plan lifecycle id_factory must return PlanId")
@@ -269,6 +278,7 @@ class PlanLifecycleService:
             plan_id=plan_id,
             created_at=created_at,
             result=result,
+            decision_basis=decision_basis,
         )
         self.repository.save(record)
         return record

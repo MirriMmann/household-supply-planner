@@ -411,10 +411,13 @@ function renderHome() {
 
     const hint = document.createElement("p");
     hint.className = "home-learning-hint";
-    if (report?.estimate) {
+    const recurringReady = report?.recurring_admission?.status === "accepted";
+    if (report?.estimate && recurringReady) {
       hint.textContent = `Обычно заканчивается примерно по ${humanQuantity(report.estimate.daily_quantity)} в день.`;
+    } else if (report?.estimate) {
+      hint.textContent = "Есть первые данные о расходе, но пока рано использовать их для прогноза.";
     } else if (balance) {
-      hint.textContent = "Обновите остаток позже ещё раз — и система начнёт понимать, как быстро это заканчивается.";
+      hint.textContent = "Обновите остаток позже ещё раз — система собирает данные о том, как быстро это заканчивается.";
     } else {
       hint.textContent = "Выберите примерно, сколько сейчас осталось.";
     }
@@ -537,12 +540,17 @@ function renderLearning() {
     const name = document.createElement("strong");
     name.textContent = `${itemEmoji(report.item_id)} ${itemName(report.item_id)}`;
     const rate = document.createElement("span");
-    rate.textContent = report.estimate ? `${humanQuantity(report.estimate.daily_quantity)} / день` : "Нужно больше данных";
+    const recurringReady = report?.recurring_admission?.status === "accepted";
+    rate.textContent = report.estimate && recurringReady
+      ? `${humanQuantity(report.estimate.daily_quantity)} / день`
+      : "Нужно больше данных";
     row.append(name, rate);
     const note = document.createElement("small");
-    note.textContent = report.estimate
+    note.textContent = report.estimate && recurringReady
       ? `Учтены наблюдения примерно за ${displayNumber(report.estimate.observed_days)} дн.`
-      : "После следующего обновления остатка система попробует оценить расход.";
+      : report.estimate
+        ? "Есть предварительная оценка, но она пока не влияет на будущие покупки."
+        : "После следующих обновлений остатка система попробует оценить обычный расход.";
     card.append(row, note);
     list.appendChild(card);
   }

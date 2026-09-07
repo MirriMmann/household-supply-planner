@@ -11,6 +11,7 @@ from household_supply.household import (
     HouseholdEventRepositoryError,
     HouseholdProjectionError,
     HouseholdState,
+    admit_recurring_estimate,
     serialize_household_event,
 )
 
@@ -147,9 +148,14 @@ def _serialize_estimate(estimate) -> dict[str, Any] | None:
 
 
 def serialize_depletion_report(report: DepletionLearningReport) -> dict[str, Any]:
+    admission = admit_recurring_estimate(report)
     return {
         "item_id": report.item.id,
         "estimate": _serialize_estimate(report.estimate),
+        "recurring_admission": {
+            "status": admission.status.value,
+            "reasons": list(admission.reasons),
+        },
         "direct_observation_ids_used": list(report.direct_observation_ids_used),
         "direct_observation_ids_shadowed": list(
             report.direct_observation_ids_shadowed

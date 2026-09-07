@@ -11,6 +11,8 @@ const state = {
   mustHaves: new Map(),
   pendingStocktakes: new Map(),
   savingStocktakes: false,
+  shoppingSession: null,
+  shoppingConfirming: false,
   view: "shopping",
 };
 
@@ -37,6 +39,7 @@ async function request(path, options = {}) {
 function byId(id) { return document.getElementById(id); }
 function itemById(id) { return state.catalog.items.find((item) => item.item_id === id); }
 function skusForItem(id) { return state.catalog.skus.filter((sku) => sku.item_id === id); }
+function skuById(id) { return state.catalog.skus.find((sku) => sku.sku_id === id) || null; }
 function primarySku(id) { return skusForItem(id)[0] || null; }
 function itemName(id) { return itemById(id)?.name || id; }
 function balanceForItem(id) { return (state.household?.balances || []).find((entry) => entry.item_id === id) || null; }
@@ -745,7 +748,320 @@ function buildCoverageReason(record, context) {
   return nodes;
 }
 
-function renderPlan(record, context = null) {
+const SHOPPING_STATUS = Object.freeze({
+  PENDING: "pending",
+  PICKED: "picked",
+  NOT_FOUND: "not_found",
+  SKIPPED: "skipped",
+  CONFIRMED: "confirmed",
+});
+
+function shoppingStorageKey(planId) {
+  return `hsp:shopping:${planId}`;
+}
+
+function shoppingEntryKey(purchase, index) {
+  return `${purchase.offer_id || purchase.sku_id}:${index}`;
+}
+
+function confirmedPlanEvents(planId) {
+  const sourceRef = `plan:${planId}`;
+  return state.history.filter(
+    (event) =>
+      event.event_type === "purchase" &&
+      event.body?.source_ref === sourceRef &&
+      typeof event.event_id === "string" &&
+      typeof event.body?.sku_id === "string",
+  );
+}
+
+function loadShoppingSession(record) {
+  const purchases = record.result?.purchases || [];
+  const confirmedEvents = confirmedPlanEvents(record.plan_id);
+  const confirmedById = new Map(
+    confirmedEvents.map((event) => [event.event_id, event]),
+  );
+  let stored = null;
+  try {
+    stored = JSON.parse(sessionStorage.getItem(shoppingStorageKey(record.plan_id)) || "null");
+  } catch {
+    stored = null;
+  }
+
+  const validStatuses = new Set(Object.values(SHOPPING_STATUS));
+  const storedCurrent =
+    stored &&
+    stored.planId === record.plan_id &&
+    stored.items &&
+    typeof stored.items === "object";
+
+  const reservedEventIds = new Set();
+  if (storedCurrent) {
+    for (const previous of Object.values(stored.items)) {
+      if (
+        previous &&
+        typeof previous.eventId === "string" &&
+        confirmedById.has(previous.eventId)
+      ) {
+        reservedEventIds.add(previous.eventId);
+      }
+    }
+  }
+
+  const legacyEventsBySku = new Map();
+  if (!storedCurrent) {
+    for (const event of confirmedEvents) {
+      if (reservedEventIds.has(event.event_id)) continue;
+      const skuId = event.body.sku_id;
+      const existing = legacyEventsBySku.get(skuId) || [];
+      existing.push(event);
+      legacyEventsBySku.set(skuId, existing);
+    }
+  }
+
+  const items = {};
+  purchases.forEach((purchase, index) => {
+    const key = shoppingEntryKey(purchase, index);
+    const previous =
+      storedCurrent && typeof stored.items[key] === "object"
+        ? stored.items[key]
+        : null;
+
+    let eventId =
+      previous && typeof previous.eventId === "string" && previous.eventId
+        ? previous.eventId
+        : null;
+    let status =
+      previous && validStatuses.has(previous.status)
+        ? previous.status
+        : SHOPPING_STATUS.PENDING;
+
+    if (eventId && confirmedById.has(eventId)) {
+      status = SHOPPING_STATUS.CONFIRMED;
+    } else if (status === SHOPPING_STATUS.CONFIRMED) {
+      // A reset can invalidate stale session-only confirmation state.
+      status = SHOPPING_STATUS.PENDING;
+      eventId = null;
+    }
+
+    if (!eventId && !storedCurrent) {
+      const legacy = legacyEventsBySku.get(purchase.sku_id) || [];
+      const recovered = legacy.shift() || null;
+      if (recovered) {
+        eventId = recovered.event_id;
+        status = SHOPPING_STATUS.CONFIRMED;
+      }
+    }
+
+    const actualPacks =
+      previous && Number.isInteger(previous.actualPacks) && previous.actualPacks > 0
+        ? previous.actualPacks
+        : purchase.packs;
+
+    items[key] = {
+      status,
+      actualPacks,
+      eventId,
+    };
+  });
+
+  const completed =
+    Boolean(stored?.completed) &&
+    Object.values(items).every(
+      (entry) =>
+        entry.status === SHOPPING_STATUS.CONFIRMED ||
+        entry.status === SHOPPING_STATUS.NOT_FOUND ||
+        entry.status === SHOPPING_STATUS.SKIPPED,
+    );
+
+  return { planId: record.plan_id, items, completed };
+}
+
+function ensureShoppingSession(record) {
+  if (!record.plan_id) return null;
+  if (!state.shoppingSession || state.shoppingSession.planId !== record.plan_id) {
+    state.shoppingSession = loadShoppingSession(record);
+    persistShoppingSession();
+  }
+  return state.shoppingSession;
+}
+
+function persistShoppingSession() {
+  const session = state.shoppingSession;
+  if (!session?.planId) return;
+  sessionStorage.setItem(shoppingStorageKey(session.planId), JSON.stringify(session));
+}
+
+function shoppingCounts(session) {
+  const entries = Object.values(session?.items || {});
+  return {
+    total: entries.length,
+    resolved: entries.filter((entry) => entry.status !== SHOPPING_STATUS.PENDING).length,
+    picked: entries.filter((entry) => entry.status === SHOPPING_STATUS.PICKED).length,
+    confirmed: entries.filter((entry) => entry.status === SHOPPING_STATUS.CONFIRMED).length,
+  };
+}
+
+function rerenderShopping(record) {
+  renderPlan(record, state.activeContext, { preserveScroll: true });
+}
+
+function setShoppingStatus(record, key, status) {
+  const session = ensureShoppingSession(record);
+  const entry = session?.items?.[key];
+  if (
+    !entry ||
+    session.completed ||
+    state.shoppingConfirming ||
+    entry.status === SHOPPING_STATUS.CONFIRMED
+  ) return;
+
+  entry.status = entry.status === status ? SHOPPING_STATUS.PENDING : status;
+  persistShoppingSession();
+  rerenderShopping(record);
+}
+
+function setShoppingPacks(record, key, packs) {
+  const session = ensureShoppingSession(record);
+  const entry = session?.items?.[key];
+  if (
+    !entry ||
+    session.completed ||
+    state.shoppingConfirming ||
+    entry.status !== SHOPPING_STATUS.PICKED
+  ) return;
+
+  entry.actualPacks = Math.max(1, packs);
+  persistShoppingSession();
+  rerenderShopping(record);
+}
+
+function renderShoppingActions(record, feasible) {
+  const actions = byId("shopping-actions");
+  const purchases = record.result?.purchases || [];
+  if (!feasible || !purchases.length) {
+    actions.classList.add("hidden");
+    return;
+  }
+
+  const session = ensureShoppingSession(record);
+  const counts = shoppingCounts(session);
+  const label = byId("shopping-progress-label");
+  const note = byId("shopping-progress-note");
+  const finish = byId("finish-shopping");
+
+  actions.classList.remove("hidden");
+  if (session.completed) {
+    label.textContent = "Покупки завершены";
+    note.textContent =
+      counts.confirmed > 0
+        ? `Подтверждено покупок: ${counts.confirmed}.`
+        : "По этому списку фактических покупок не было.";
+    finish.textContent = "Готово";
+    finish.disabled = true;
+    return;
+  }
+
+  label.textContent = `${counts.resolved} из ${counts.total} отмечено`;
+  const missing = counts.total - counts.resolved;
+  if (missing > 0) {
+    note.textContent = `Осталось решить по позициям: ${missing}.`;
+    finish.textContent = `Осталось отметить: ${missing}`;
+    finish.disabled = true;
+    return;
+  }
+
+  note.textContent =
+    counts.picked > 0
+      ? "Домашние запасы изменятся только после этого подтверждения."
+      : "Все позиции отмечены без фактической покупки.";
+  finish.textContent = state.shoppingConfirming
+    ? "Подтверждаем…"
+    : counts.picked > 0
+      ? `Подтвердить покупки (${counts.picked})`
+      : "Завершить без покупок";
+  finish.disabled = state.shoppingConfirming;
+}
+
+async function finishShoppingSession(record) {
+  const session = ensureShoppingSession(record);
+  if (!session || session.completed || state.shoppingConfirming) return;
+
+  const counts = shoppingCounts(session);
+  if (counts.resolved !== counts.total) return;
+
+  const purchases = record.result?.purchases || [];
+  const pending = purchases
+    .map((purchase, index) => ({ purchase, key: shoppingEntryKey(purchase, index) }))
+    .filter(({ key }) => session.items[key]?.status === SHOPPING_STATUS.PICKED);
+
+  if (!pending.length) {
+    session.completed = true;
+    persistShoppingSession();
+    rerenderShopping(record);
+    showToast("Покупки завершены. Домашние запасы не изменились.");
+    return;
+  }
+
+  state.shoppingConfirming = true;
+  rerenderShopping(record);
+
+  let saved = 0;
+  let failure = null;
+  for (const { purchase, key } of pending) {
+    const entry = session.items[key];
+    if (!entry.eventId) {
+      entry.eventId = eventId("purchase");
+      persistShoppingSession();
+    }
+    try {
+      const response = await request(
+        `/plans/${encodeURIComponent(record.plan_id)}/purchases`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            event_id: entry.eventId,
+            sku_id: purchase.sku_id,
+            packs: entry.actualPacks,
+          }),
+        },
+      );
+      entry.status = SHOPPING_STATUS.CONFIRMED;
+      if (response.household) state.household = response.household;
+      saved += 1;
+      persistShoppingSession();
+    } catch (error) {
+      failure = error;
+      break;
+    }
+  }
+
+  state.shoppingConfirming = false;
+  const remaining = shoppingCounts(session);
+  if (!failure && remaining.picked === 0 && remaining.resolved === remaining.total) {
+    session.completed = true;
+  }
+  persistShoppingSession();
+
+  if (saved > 0) {
+    try {
+      await refreshOperationalState();
+    } catch (error) {
+      failure ||= error;
+    }
+  }
+
+  rerenderShopping(record);
+  if (failure) {
+    const progress = saved ? `Подтверждено покупок: ${saved}. ` : "";
+    showToast(`${progress}${friendlyError(failure)}`, true);
+  } else {
+    showToast(`Покупки подтверждены: ${saved}. Домашние запасы обновлены.`);
+  }
+}
+
+function renderPlan(record, context = null, options = {}) {
+  const preservedScroll = options.preserveScroll ? window.scrollY : null;
   state.activePlan = record;
   state.activeContext = context;
   const panel = byId("plan-result-panel");
@@ -762,39 +1078,54 @@ function renderPlan(record, context = null) {
   addChip(summary, "Итого", moneyText(result.total_cost));
   addChip(summary, "Останется", moneyText(result.budget_remaining));
   if (context?.demand?.horizon_days) addChip(summary, "На", dayText(context.demand.horizon_days));
+  if ((result.purchases || []).length) addChip(summary, "Позиций", String(result.purchases.length));
 
   const purchases = byId("purchase-list");
   purchases.replaceChildren();
 
   if (!(result.purchases || []).length) {
-  const empty = document.createElement("div");
-  empty.className = "empty-state";
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
 
-  if (feasible) {
-    empty.textContent = "Похоже, сейчас ничего докупать не нужно.";
-  } else {
-    const reasons = result.infeasibility_reasons || [];
-    const explanations = result.explanation || [];
-
-    if (result.minimum_required_cost) {
-      empty.textContent =
-        `С этим бюджетом план не помещается. Нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
-    } else if (reasons.length) {
-      empty.textContent = reasons.join(" ");
-    } else if (explanations.length) {
-      empty.textContent = explanations.join(" ");
+    if (feasible) {
+      empty.textContent = "Похоже, сейчас ничего докупать не нужно.";
     } else {
-      empty.textContent =
-        "Не удалось составить план. Попробуйте увеличить бюджет или изменить обязательные покупки.";
+      const reasons = result.infeasibility_reasons || [];
+      const explanations = result.explanation || [];
+      if (result.minimum_required_cost) {
+        empty.textContent =
+          `С этим бюджетом план не помещается. Нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
+      } else if (reasons.length) {
+        empty.textContent = reasons.join(" ");
+      } else if (explanations.length) {
+        empty.textContent = explanations.join(" ");
+      } else {
+        empty.textContent =
+          "Не удалось составить план. Попробуйте увеличить бюджет или изменить обязательные покупки.";
+      }
     }
+    purchases.appendChild(empty);
   }
 
-  purchases.appendChild(empty);
-}
+  const session =
+    feasible && (result.purchases || []).length ? ensureShoppingSession(record) : null;
 
-  for (const purchase of result.purchases || []) {
+  for (const [index, purchase] of (result.purchases || []).entries()) {
+    const key = shoppingEntryKey(purchase, index);
+    const entry = session?.items?.[key] || {
+      status: SHOPPING_STATUS.PENDING,
+      actualPacks: purchase.packs,
+      eventId: null,
+    };
+    const sku = skuById(purchase.sku_id);
+
     const card = document.createElement("article");
-    card.className = "purchase-card";
+    card.className = "purchase-card shopping-card";
+    card.classList.toggle("picked", entry.status === SHOPPING_STATUS.PICKED);
+    card.classList.toggle("not-found", entry.status === SHOPPING_STATUS.NOT_FOUND);
+    card.classList.toggle("skipped", entry.status === SHOPPING_STATUS.SKIPPED);
+    card.classList.toggle("confirmed", entry.status === SHOPPING_STATUS.CONFIRMED);
+
     const main = document.createElement("div");
     main.className = "purchase-main";
     const left = document.createElement("div");
@@ -805,73 +1136,106 @@ function renderPlan(record, context = null) {
     const copy = document.createElement("div");
     const title = document.createElement("div");
     title.className = "purchase-title";
-    title.textContent = purchase.sku_name || itemName(purchase.item_id);
+    title.textContent = itemName(purchase.item_id);
     const meta = document.createElement("div");
     meta.className = "purchase-meta";
-    meta.textContent = `${packageText(purchase.packs)} · всего ${humanQuantity(purchase.acquired_quantity)}`;
-    copy.append(title, meta);
+    const packageSize = sku?.package_quantity
+      ? humanQuantity(sku.package_quantity)
+      : humanQuantity(purchase.acquired_quantity);
+    meta.textContent = `${purchase.sku_name || purchase.sku_id} · ${packageSize}`;
+    const planned = document.createElement("div");
+    planned.className = "purchase-plan";
+    planned.textContent = `План: ${packageText(purchase.packs)} · ${moneyText(purchase.cost)}`;
+    copy.append(title, meta, planned);
     left.append(emoji, copy);
-    const cost = document.createElement("div");
-    cost.className = "purchase-cost";
-    cost.textContent = moneyText(purchase.cost);
-    main.append(left, cost);
+    main.appendChild(left);
+
+    if (entry.status === SHOPPING_STATUS.CONFIRMED) {
+      const badge = document.createElement("span");
+      badge.className = "shopping-state-badge confirmed";
+      badge.textContent = "✓ Подтверждено";
+      main.appendChild(badge);
+    } else if (entry.status === SHOPPING_STATUS.NOT_FOUND) {
+      const badge = document.createElement("span");
+      badge.className = "shopping-state-badge not-found";
+      badge.textContent = "Не найден";
+      main.appendChild(badge);
+    } else if (entry.status === SHOPPING_STATUS.SKIPPED) {
+      const badge = document.createElement("span");
+      badge.className = "shopping-state-badge skipped";
+      badge.textContent = "Не беру";
+      main.appendChild(badge);
+    } else {
+      const cost = document.createElement("div");
+      cost.className = "purchase-cost";
+      cost.textContent = moneyText(purchase.cost);
+      main.appendChild(cost);
+    }
     card.appendChild(main);
 
-    const confirmation = document.createElement("div");
-    confirmation.className = "confirm-row";
-    const question = document.createElement("span");
-    question.className = "confirm-question";
-    question.textContent = "После магазина отметьте, сколько купили";
+    if (entry.status === SHOPPING_STATUS.CONFIRMED) {
+      const done = document.createElement("div");
+      done.className = "shopping-confirmed-note";
+      done.textContent = "Эта покупка уже записана в домашние запасы.";
+      card.appendChild(done);
+      purchases.appendChild(card);
+      continue;
+    }
+
     const controls = document.createElement("div");
-    controls.className = "confirm-controls";
-    let actualPacks = purchase.packs;
-    const stepperHolder = document.createElement("div");
-    const redrawStepper = () => {
-      stepperHolder.replaceChildren(makeStepper(actualPacks, (next) => {
-        actualPacks = Math.max(1, next);
-        redrawStepper();
-      }, 1));
-    };
-    redrawStepper();
-    const confirm = document.createElement("button");
-    confirm.type = "button";
-    confirm.className = "secondary-button";
-    confirm.textContent = "Купил(а)";
-    confirm.addEventListener("click", async () => {
-      try {
-        confirm.disabled = true;
-        const operationKey = `hsp:purchase:${record.plan_id}:${purchase.offer_id || purchase.sku_id}`;
-        let operationId = sessionStorage.getItem(operationKey);
-        if (!operationId) {
-          operationId = eventId("purchase");
-          sessionStorage.setItem(operationKey, operationId);
-        }
-        const response = await request(`/plans/${encodeURIComponent(record.plan_id)}/purchases`, {
-          method: "POST",
-          body: JSON.stringify({ event_id: operationId, sku_id: purchase.sku_id, packs: actualPacks }),
-        });
-        sessionStorage.removeItem(operationKey);
-        confirmation.replaceChildren();
-        const done = document.createElement("span");
-        done.className = "confirmed";
-        done.textContent = `✓ Отмечено: ${packageText(response.purchase?.actual_packs ?? actualPacks)}`;
-        confirmation.appendChild(done);
-        showToast("Покупка добавлена в домашние запасы.");
-        await refreshOperationalState();
-      } catch (error) {
-        showToast(friendlyError(error), true);
-        confirm.disabled = false;
-      }
-    });
-    controls.append(stepperHolder, confirm);
-    confirmation.append(question, controls);
-    card.appendChild(confirmation);
+    controls.className = "shopping-status-controls";
+    for (const [choiceStatus, label] of [
+      [SHOPPING_STATUS.PICKED, "✓ Взял"],
+      [SHOPPING_STATUS.NOT_FOUND, "Не нашёл"],
+      [SHOPPING_STATUS.SKIPPED, "Не беру"],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "shopping-status-button";
+      button.classList.toggle("selected", entry.status === choiceStatus);
+      button.textContent = label;
+      button.disabled = Boolean(session?.completed) || state.shoppingConfirming;
+      button.setAttribute("aria-pressed", entry.status === choiceStatus ? "true" : "false");
+      button.addEventListener("click", () => setShoppingStatus(record, key, choiceStatus));
+      controls.appendChild(button);
+    }
+    card.appendChild(controls);
+
+    if (entry.status === SHOPPING_STATUS.PICKED) {
+      const actual = document.createElement("div");
+      actual.className = "shopping-actual";
+      const question = document.createElement("div");
+      question.className = "shopping-actual-copy";
+      const strong = document.createElement("strong");
+      strong.textContent = "Фактически взято";
+      const note = document.createElement("small");
+      note.textContent =
+        entry.actualPacks === purchase.packs
+          ? "Как в плане"
+          : `Планировалось: ${packageText(purchase.packs)}`;
+      question.append(strong, note);
+
+      const stepperHolder = document.createElement("div");
+      stepperHolder.appendChild(
+        makeStepper(entry.actualPacks, (next) => setShoppingPacks(record, key, next), 1),
+      );
+      actual.append(question, stepperHolder);
+      card.appendChild(actual);
+    }
+
     purchases.appendChild(card);
   }
 
+  renderShoppingActions(record, feasible);
+
   const explanation = byId("explanation-list");
   explanation.replaceChildren(...buildCoverageReason(record, context));
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if (preservedScroll !== null) {
+    window.scrollTo(0, preservedScroll);
+  } else {
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 async function openStoredPlan(planId) {
@@ -929,6 +1293,9 @@ byId("discard-pending-stocktakes").addEventListener("click", () => {
   renderHome();
 });
 byId("save-pending-stocktakes").addEventListener("click", savePendingStocktakes);
+byId("finish-shopping").addEventListener("click", () => {
+  if (state.activePlan) finishShoppingSession(state.activePlan);
+});
 
 for (const button of document.querySelectorAll("[data-days]")) {
   button.addEventListener("click", () => {

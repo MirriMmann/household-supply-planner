@@ -110,12 +110,22 @@
         <div class="plan-summary" id="plan-summary"></div>
         <div id="purchase-list" class="purchase-list"></div>
 
+        <div id="shopping-actions" class="shopping-actions hidden" aria-live="polite">
+          <div class="shopping-progress-copy">
+            <strong id="shopping-progress-label">0 из 0 отмечено</strong>
+            <small id="shopping-progress-note">Отметьте каждую позицию.</small>
+          </div>
+          <button id="finish-shopping" class="primary-button" type="button">
+            Подтвердить покупки
+          </button>
+        </div>
+
         <details class="explanation-details">
           <summary>Почему именно столько?</summary>
           <div id="explanation-list" class="explanation-list"></div>
         </details>
 
-        <p class="human-note">Запасы дома изменятся только после того, как вы отметите, что действительно купили.</p>
+        <p class="human-note">Отметка «Взял» — это только shopping state. Домашние запасы изменятся лишь после финального подтверждения покупок.</p>
       </section>
     </section>
 

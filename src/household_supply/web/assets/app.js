@@ -700,50 +700,145 @@ function addChip(container, label, value) {
   container.appendChild(chip);
 }
 
+function explanationItem(titleText, detailText) {
+  const item = document.createElement("article");
+  item.className = "explanation-item";
+  const title = document.createElement("strong");
+  title.textContent = titleText;
+  const detail = document.createElement("small");
+  detail.textContent = detailText;
+  item.append(title, detail);
+  return item;
+}
+
+function positiveQuantity(quantity) {
+  if (!quantity) return false;
+  const amount = Number(decimalText(quantity.amount));
+  return Number.isFinite(amount) && amount > 0;
+}
+
 function buildCoverageReason(record, context) {
   const result = record.result || {};
   const requestData = record.request || {};
-  const demands = new Map((requestData.demands || []).map((entry) => [entry.item_id, entry.quantity]));
+  const basis =
+    requestData.decision_basis?.kind === "household_replenishment"
+      ? requestData.decision_basis
+      : null;
+  const demands = new Map(
+    (requestData.demands || []).map((entry) => [entry.item_id, entry.quantity]),
+  );
+  const explicitByItem = new Map(
+    (basis?.explicit_needs || []).map((entry) => [entry.item_id, entry]),
+  );
+  const recurringByItem = new Map(
+    (basis?.recurring_estimates || []).map((entry) => [entry.item_id, entry]),
+  );
+  const recurringContributionByItem = new Map(
+    (basis?.contributions || [])
+      .filter((entry) => entry.source_id === "household:recurring")
+      .map((entry) => [entry.item_id, entry]),
+  );
   const nodes = [];
+
+  if (basis) {
+    const factors = [];
+    if (requestData.budget) factors.push(`бюджет ${moneyText(requestData.budget)}`);
+    if (recurringByItem.size) {
+      factors.push(`период ${dayText(basis.horizon_days)}`);
+      factors.push("история расхода с достаточным количеством наблюдений");
+    }
+    if (explicitByItem.size) factors.push("обязательные покупки");
+    if ((requestData.inventory || []).length) factors.push("запасы дома");
+    if (requestData.objective) factors.push("правила выбора между вариантами");
+    if (result.market?.offer_count) factors.push("доступные цены и упаковки");
+    nodes.push(
+      explanationItem(
+        "На что опирался план",
+        factors.length
+          ? `Учтены: ${factors.join(", ")}.`
+          : "Сохранена точная основа этого расчёта.",
+      ),
+    );
+  } else if (result.status === "feasible") {
+    nodes.push(
+      explanationItem(
+        "Старый сохранённый план",
+        "Для этого плана ещё не сохранялась расширенная история причин. Ниже показана только сохранённая арифметика расчёта.",
+      ),
+    );
+  }
+
   for (const coverage of result.coverage || []) {
-    const item = document.createElement("article");
-    item.className = "explanation-item";
-    const title = document.createElement("strong");
-    title.textContent = `${itemEmoji(coverage.item_id)} ${itemName(coverage.item_id)}`;
-    const detail = document.createElement("small");
     const demand = demands.get(coverage.item_id) || coverage.required;
-    detail.textContent = `Нужно ${humanQuantity(demand)} · дома учтено ${humanQuantity(coverage.inventory_used)} · покупкой добавим ${humanQuantity(coverage.purchased)}.`;
-    item.append(title, detail);
-    nodes.push(item);
+    const explicit = explicitByItem.get(coverage.item_id);
+    const recurring = recurringByItem.get(coverage.item_id);
+    const recurringContribution = recurringContributionByItem.get(coverage.item_id);
+
+    if (!basis) {
+      nodes.push(
+        explanationItem(
+          `${itemEmoji(coverage.item_id)} ${itemName(coverage.item_id)}`,
+          `Нужно ${humanQuantity(demand)} · дома учтено ${humanQuantity(coverage.inventory_used)} · покупкой добавим ${humanQuantity(coverage.purchased)}.`,
+        ),
+      );
+      continue;
+    }
+
+    const details = [];
+    if (explicit) {
+      details.push(`Вы добавили обязательно ${humanQuantity(explicit.quantity)}.`);
+    }
+    if (recurring) {
+      const contribution =
+        recurringContribution?.quantity || recurring.contribution_quantity;
+      let recurringText =
+        `Обычный расход ≈ ${humanQuantity(recurring.daily_quantity)} в день`;
+      if (recurring.observed_days) {
+        recurringText +=
+          `, по наблюдениям примерно за ${displayNumber(recurring.observed_days)} дн.`;
+      } else {
+        recurringText += ".";
+      }
+      if (contribution) {
+        recurringText +=
+          ` На ${dayText(basis.horizon_days)} из этого учтено ${humanQuantity(contribution)}.`;
+      }
+      details.push(recurringText);
+    }
+    if (positiveQuantity(coverage.inventory_used)) {
+      details.push(
+        `Из запасов дома покрывается ${humanQuantity(coverage.inventory_used)}.`,
+      );
+    }
+    details.push(`Итого нужно ${humanQuantity(demand)}.`);
+    details.push(
+      positiveQuantity(coverage.purchased)
+        ? `Покупкой добавим ${humanQuantity(coverage.purchased)}.`
+        : "Дополнительно покупать этот продукт не нужно.",
+    );
+
+    nodes.push(
+      explanationItem(
+        `${itemEmoji(coverage.item_id)} ${itemName(coverage.item_id)}`,
+        details.join(" "),
+      ),
+    );
   }
-  
-  if (!nodes.length && result.status !== "feasible") {
-  const item = document.createElement("article");
-  item.className = "explanation-item";
 
-  const title = document.createElement("strong");
-  title.textContent = "Не удалось составить план";
-
-  const detail = document.createElement("small");
-
-  const reasons = result.infeasibility_reasons || [];
-  const explanations = result.explanation || [];
-
-  if (result.minimum_required_cost) {
-    detail.textContent =
-      `Для выполнения всех потребностей нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
-  } else if (reasons.length) {
-    detail.textContent = reasons.join(" ");
-  } else if (explanations.length) {
-    detail.textContent = explanations.join(" ");
-  } else {
-    detail.textContent =
-      "Попробуйте увеличить бюджет или изменить обязательные продукты.";
+  if (!(result.coverage || []).length && result.status !== "feasible") {
+    const reasons = result.infeasibility_reasons || [];
+    const explanations = result.explanation || [];
+    let detail = "Попробуйте увеличить бюджет или изменить обязательные продукты.";
+    if (result.minimum_required_cost) {
+      detail =
+        `Для выполнения всех потребностей нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
+    } else if (reasons.length) {
+      detail = reasons.join(" ");
+    } else if (explanations.length) {
+      detail = explanations.join(" ");
+    }
+    nodes.push(explanationItem("Не удалось составить план", detail));
   }
-
-  item.append(title, detail);
-  nodes.push(item);
-}
 
   return nodes;
 }

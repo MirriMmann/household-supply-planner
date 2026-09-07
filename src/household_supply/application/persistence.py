@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 import os
@@ -14,7 +15,8 @@ from typing import Any, Mapping, Protocol
 _PLAN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _RECORD_SCHEMA_VERSION = 1
 
-_REQUEST_SNAPSHOT_KEYS = {"budget", "demands", "inventory", "objective"}
+_REQUEST_SNAPSHOT_REQUIRED_KEYS = {"budget", "demands", "inventory", "objective"}
+_REQUEST_SNAPSHOT_OPTIONAL_KEYS = {"decision_basis"}
 _RESULT_REQUIRED_KEYS = {
     "status",
     "market",
@@ -55,6 +57,206 @@ def _require_snapshot_schema(
         if unknown:
             details.append("unknown " + ", ".join(sorted(unknown)))
         raise ValueError(f"{label} has invalid schema: {'; '.join(details)}")
+
+
+def _require_nonempty_string(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string")
+    return value
+
+
+def _require_decimal_string(
+    value: Any,
+    *,
+    label: str,
+    positive: bool = False,
+) -> Decimal:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a decimal string")
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{label} must be a finite decimal string") from exc
+    if not parsed.is_finite():
+        raise ValueError(f"{label} must be a finite decimal string")
+    if positive and parsed <= 0:
+        raise ValueError(f"{label} must be positive")
+    return parsed
+
+
+def _require_quantity_snapshot(value: Any, *, label: str) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    _require_snapshot_schema(
+        value,
+        label=label,
+        required={"amount", "unit"},
+    )
+    _require_decimal_string(value["amount"], label=f"{label}.amount")
+    _require_nonempty_string(value["unit"], label=f"{label}.unit")
+
+
+def _require_decision_basis(value: Any) -> None:
+    label = "plan request decision_basis"
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    _require_snapshot_schema(
+        value,
+        label=label,
+        required={
+            "kind",
+            "as_of",
+            "horizon_days",
+            "explicit_needs",
+            "recurring_estimates",
+            "contributions",
+        },
+    )
+    if value["kind"] != "household_replenishment":
+        raise ValueError(
+            "plan request decision_basis kind must be 'household_replenishment'"
+        )
+
+    as_of = _require_nonempty_string(value["as_of"], label=f"{label}.as_of")
+    try:
+        parsed_as_of = datetime.fromisoformat(as_of)
+    except ValueError as exc:
+        raise ValueError(f"{label}.as_of must be an ISO datetime") from exc
+    _require_aware(parsed_as_of, label=f"{label}.as_of")
+    _require_decimal_string(
+        value["horizon_days"],
+        label=f"{label}.horizon_days",
+        positive=True,
+    )
+
+    explicit_needs = value["explicit_needs"]
+    recurring_estimates = value["recurring_estimates"]
+    contributions = value["contributions"]
+    if not isinstance(explicit_needs, list):
+        raise ValueError(f"{label}.explicit_needs must be an array")
+    if not isinstance(recurring_estimates, list):
+        raise ValueError(f"{label}.recurring_estimates must be an array")
+    if not isinstance(contributions, list):
+        raise ValueError(f"{label}.contributions must be an array")
+    if not contributions:
+        raise ValueError(f"{label}.contributions must not be empty")
+
+    explicit_ids: set[str] = set()
+    for index, entry in enumerate(explicit_needs):
+        entry_label = f"{label}.explicit_needs[{index}]"
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{entry_label} must be an object")
+        _require_snapshot_schema(
+            entry,
+            label=entry_label,
+            required={"item_id", "quantity"},
+        )
+        item_id = _require_nonempty_string(
+            entry["item_id"], label=f"{entry_label}.item_id"
+        )
+        if item_id in explicit_ids:
+            raise ValueError(f"{label}.explicit_needs contains duplicate item_id")
+        explicit_ids.add(item_id)
+        _require_quantity_snapshot(
+            entry["quantity"], label=f"{entry_label}.quantity"
+        )
+
+    recurring_ids: set[str] = set()
+    recurring_required = {
+        "item_id",
+        "daily_quantity",
+        "sample_count",
+        "observed_days",
+        "total_depleted",
+        "observed_microseconds",
+        "daily_min",
+        "daily_max",
+        "uncertainty",
+        "contribution_quantity",
+    }
+    for index, entry in enumerate(recurring_estimates):
+        entry_label = f"{label}.recurring_estimates[{index}]"
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{entry_label} must be an object")
+        _require_snapshot_schema(
+            entry,
+            label=entry_label,
+            required=recurring_required,
+        )
+        item_id = _require_nonempty_string(
+            entry["item_id"], label=f"{entry_label}.item_id"
+        )
+        if item_id in recurring_ids:
+            raise ValueError(f"{label}.recurring_estimates contains duplicate item_id")
+        recurring_ids.add(item_id)
+        if type(entry["sample_count"]) is not int or entry["sample_count"] < 1:
+            raise ValueError(f"{entry_label}.sample_count must be a positive integer")
+        if (
+            type(entry["observed_microseconds"]) is not int
+            or entry["observed_microseconds"] <= 0
+        ):
+            raise ValueError(
+                f"{entry_label}.observed_microseconds must be a positive integer"
+            )
+        _require_decimal_string(
+            entry["observed_days"],
+            label=f"{entry_label}.observed_days",
+            positive=True,
+        )
+        for quantity_key in (
+            "daily_quantity",
+            "total_depleted",
+            "daily_min",
+            "daily_max",
+            "uncertainty",
+            "contribution_quantity",
+        ):
+            _require_quantity_snapshot(
+                entry[quantity_key],
+                label=f"{entry_label}.{quantity_key}",
+            )
+
+    contribution_keys: set[tuple[str, str]] = set()
+    recurring_contribution_ids: set[str] = set()
+    explicit_contribution_ids: set[str] = set()
+    for index, entry in enumerate(contributions):
+        entry_label = f"{label}.contributions[{index}]"
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{entry_label} must be an object")
+        _require_snapshot_schema(
+            entry,
+            label=entry_label,
+            required={"source_id", "contribution_id", "item_id", "quantity"},
+        )
+        source_id = _require_nonempty_string(
+            entry["source_id"], label=f"{entry_label}.source_id"
+        )
+        contribution_id = _require_nonempty_string(
+            entry["contribution_id"], label=f"{entry_label}.contribution_id"
+        )
+        item_id = _require_nonempty_string(
+            entry["item_id"], label=f"{entry_label}.item_id"
+        )
+        key = (source_id, contribution_id)
+        if key in contribution_keys:
+            raise ValueError(f"{label}.contributions contains duplicate identity")
+        contribution_keys.add(key)
+        _require_quantity_snapshot(
+            entry["quantity"], label=f"{entry_label}.quantity"
+        )
+        if source_id == "household:recurring":
+            recurring_contribution_ids.add(item_id)
+        elif source_id == "request:explicit":
+            explicit_contribution_ids.add(item_id)
+
+    if recurring_ids != recurring_contribution_ids:
+        raise ValueError(
+            f"{label} recurring estimates do not match recurring contributions"
+        )
+    if explicit_ids != explicit_contribution_ids:
+        raise ValueError(
+            f"{label} explicit needs do not match explicit contributions"
+        )
 
 
 
@@ -203,8 +405,11 @@ class PlanRecord:
         _require_snapshot_schema(
             request,
             label="plan request snapshot",
-            required=_REQUEST_SNAPSHOT_KEYS,
+            required=_REQUEST_SNAPSHOT_REQUIRED_KEYS,
+            optional=_REQUEST_SNAPSHOT_OPTIONAL_KEYS,
         )
+        if "decision_basis" in request:
+            _require_decision_basis(request["decision_basis"])
         _require_snapshot_schema(
             result,
             label="plan result snapshot",

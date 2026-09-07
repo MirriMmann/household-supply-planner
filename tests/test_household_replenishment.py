@@ -145,6 +145,30 @@ def test_replenishment_runs_household_history_to_persisted_plan() -> None:
     )
     assert prep.application_request.inventory[0].quantity == Quantity("1100", "ml")
 
+    stored_request = result.plan_record.request.to_mapping()
+    basis = stored_request["decision_basis"]
+    assert basis["kind"] == "household_replenishment"
+    assert basis["as_of"] == NOW.isoformat()
+    assert basis["horizon_days"] == "7"
+    assert basis["explicit_needs"] == []
+    assert basis["recurring_estimates"][0]["item_id"] == "milk"
+    assert basis["recurring_estimates"][0]["daily_quantity"] == {
+        "amount": "400.000000000000",
+        "unit": "ml",
+    }
+    assert basis["recurring_estimates"][0]["contribution_quantity"] == {
+        "amount": "2800.000000000000",
+        "unit": "ml",
+    }
+    assert basis["contributions"] == [
+        {
+            "source_id": "household:recurring",
+            "contribution_id": "recurring:milk",
+            "item_id": "milk",
+            "quantity": {"amount": "2800.000000000000", "unit": "ml"},
+        }
+    ]
+
     stored_result = result.plan_record.result.to_mapping()
     assert stored_result["status"] == "feasible"
     assert stored_result["total_cost"] == {"amount": "240", "currency": "KGS"}
@@ -166,6 +190,14 @@ def test_explicit_and_recurring_demands_are_compiled_together() -> None:
     compilation = result.preparation.demand_compilation
     assert compilation.demands[0].quantity == Quantity("3000.000000000000", "ml")
     assert {c.source_id for c in compilation.contributions} == {
+        "household:recurring",
+        "request:explicit",
+    }
+    basis = result.plan_record.request.to_mapping()["decision_basis"]
+    assert basis["explicit_needs"] == [
+        {"item_id": "milk", "quantity": {"amount": "200", "unit": "ml"}}
+    ]
+    assert {entry["source_id"] for entry in basis["contributions"]} == {
         "household:recurring",
         "request:explicit",
     }
@@ -356,6 +388,7 @@ def test_replenishment_json_api_creates_explainable_persisted_plan() -> None:
     stored = api.handle("GET", "/plans/plan-m9")
     assert stored.status == 200
     assert stored.body["plan_id"] == "plan-m9"
+    assert stored.body["request"]["decision_basis"] == response.body["plan"]["request"]["decision_basis"]
 
 
 def test_replenishment_json_contract_is_strict_and_exact() -> None:

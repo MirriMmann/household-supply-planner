@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Callable
+from typing import Any, Callable
 
 from household_supply.demand import (
     DemandCompilation,
@@ -143,6 +143,66 @@ class HouseholdReplenishmentPreparation:
             )
 
 
+def _decision_quantity(value: Quantity) -> dict[str, str]:
+    return {"amount": str(value.amount), "unit": value.unit}
+
+
+def serialize_replenishment_decision_basis(
+    preparation: HouseholdReplenishmentPreparation,
+) -> dict[str, Any]:
+    # Durable, inspectable basis that explains how household demand was formed.
+    recurring_contributions = {
+        contribution.item.id: contribution
+        for contribution in preparation.demand_compilation.contributions
+        if contribution.source_id == "household:recurring"
+    }
+    recurring_estimates = []
+    for estimate in preparation.estimates:
+        contribution = recurring_contributions.get(estimate.item.id)
+        if contribution is None:
+            raise ValueError(
+                "admitted recurring estimate is missing its compiled demand contribution: "
+                f"{estimate.item.id}"
+            )
+        recurring_estimates.append(
+            {
+                "item_id": estimate.item.id,
+                "daily_quantity": _decision_quantity(estimate.daily_quantity),
+                "sample_count": estimate.sample_count,
+                "observed_days": str(estimate.observed_days),
+                "total_depleted": _decision_quantity(estimate.total_depleted),
+                "observed_microseconds": estimate.observed_microseconds,
+                "daily_min": _decision_quantity(estimate.daily_min),
+                "daily_max": _decision_quantity(estimate.daily_max),
+                "uncertainty": _decision_quantity(estimate.uncertainty),
+                "contribution_quantity": _decision_quantity(contribution.quantity),
+            }
+        )
+
+    return {
+        "kind": "household_replenishment",
+        "as_of": preparation.as_of.isoformat(),
+        "horizon_days": str(preparation.request.horizon_days),
+        "explicit_needs": [
+            {
+                "item_id": need.item_id,
+                "quantity": _decision_quantity(need.quantity),
+            }
+            for need in preparation.request.explicit_needs
+        ],
+        "recurring_estimates": recurring_estimates,
+        "contributions": [
+            {
+                "source_id": contribution.source_id,
+                "contribution_id": contribution.contribution_id,
+                "item_id": contribution.item.id,
+                "quantity": _decision_quantity(contribution.quantity),
+            }
+            for contribution in preparation.demand_compilation.contributions
+        ],
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class HouseholdReplenishmentResult:
     preparation: HouseholdReplenishmentPreparation
@@ -150,6 +210,9 @@ class HouseholdReplenishmentResult:
 
     def __post_init__(self) -> None:
         expected_request = serialize_plan_request(self.preparation.application_request)
+        expected_request["decision_basis"] = serialize_replenishment_decision_basis(
+            self.preparation
+        )
         if self.plan_record.request.to_mapping() != expected_request:
             raise ValueError(
                 "persisted plan request does not match household replenishment preparation"
@@ -287,5 +350,8 @@ class HouseholdReplenishmentService:
 
     def create(self, request: HouseholdReplenishmentRequest) -> HouseholdReplenishmentResult:
         preparation = self.prepare(request)
-        record = self.plans.create(preparation.application_request)
+        record = self.plans.create(
+            preparation.application_request,
+            decision_basis=serialize_replenishment_decision_basis(preparation),
+        )
         return HouseholdReplenishmentResult(preparation, record)

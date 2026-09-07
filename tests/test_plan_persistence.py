@@ -70,6 +70,99 @@ def test_plan_request_snapshot_preserves_explicit_request_semantics() -> None:
     assert payload["objective"] is None
 
 
+def valid_decision_basis() -> dict:
+    return {
+        "kind": "household_replenishment",
+        "as_of": NOW.isoformat(),
+        "horizon_days": "7",
+        "explicit_needs": [
+            {
+                "item_id": "milk",
+                "quantity": {"amount": "200", "unit": "ml"},
+            }
+        ],
+        "recurring_estimates": [
+            {
+                "item_id": "milk",
+                "daily_quantity": {"amount": "400", "unit": "ml"},
+                "sample_count": 2,
+                "observed_days": "2",
+                "total_depleted": {"amount": "800", "unit": "ml"},
+                "observed_microseconds": 172800000000,
+                "daily_min": {"amount": "300", "unit": "ml"},
+                "daily_max": {"amount": "500", "unit": "ml"},
+                "uncertainty": {"amount": "100", "unit": "ml"},
+                "contribution_quantity": {"amount": "2800", "unit": "ml"},
+            }
+        ],
+        "contributions": [
+            {
+                "source_id": "household:recurring",
+                "contribution_id": "recurring:milk",
+                "item_id": "milk",
+                "quantity": {"amount": "2800", "unit": "ml"},
+            },
+            {
+                "source_id": "request:explicit",
+                "contribution_id": "explicit:0",
+                "item_id": "milk",
+                "quantity": {"amount": "200", "unit": "ml"},
+            },
+        ],
+    }
+
+
+def test_plan_record_request_snapshot_accepts_closed_decision_basis() -> None:
+    record = make_record()
+    request = record.request.to_mapping()
+    request["decision_basis"] = valid_decision_basis()
+    enriched = PlanRecord.create(
+        plan_id=PlanId("with-basis"),
+        created_at=record.created_at,
+        request=request,
+        result=record.result.to_mapping(),
+        market_evidence=record.market_evidence.to_mapping(),
+    )
+    assert enriched.request.to_mapping()["decision_basis"] == valid_decision_basis()
+
+
+def test_plan_record_request_snapshot_rejects_unstructured_decision_basis() -> None:
+    record = make_record()
+    request = record.request.to_mapping()
+    request["decision_basis"] = {
+        "kind": "household_replenishment",
+        "contributions": [],
+    }
+    with pytest.raises(ValueError, match="decision_basis"):
+        PlanRecord.create(
+            plan_id=PlanId("bad-basis"),
+            created_at=record.created_at,
+            request=request,
+            result=record.result.to_mapping(),
+            market_evidence=record.market_evidence.to_mapping(),
+        )
+
+
+def test_plan_record_request_snapshot_rejects_mismatched_provenance() -> None:
+    record = make_record()
+    request = record.request.to_mapping()
+    basis = valid_decision_basis()
+    basis["contributions"] = [
+        contribution
+        for contribution in basis["contributions"]
+        if contribution["source_id"] != "request:explicit"
+    ]
+    request["decision_basis"] = basis
+    with pytest.raises(ValueError, match="explicit needs do not match"):
+        PlanRecord.create(
+            plan_id=PlanId("mismatched-basis"),
+            created_at=record.created_at,
+            request=request,
+            result=record.result.to_mapping(),
+            market_evidence=record.market_evidence.to_mapping(),
+        )
+
+
 def test_market_evidence_snapshot_contains_complete_m4_basis() -> None:
     result = make_service().plan(make_request())
     evidence = serialize_market_evidence(result.market_compilation)

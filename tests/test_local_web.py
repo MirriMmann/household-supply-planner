@@ -164,6 +164,9 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert 'id="stocktake-actions"' in text
     assert 'id="save-pending-stocktakes"' in text
     assert 'id="discard-pending-stocktakes"' in text
+    assert 'id="shopping-actions"' in text
+    assert 'id="finish-shopping"' in text
+    assert "shopping state" in text
     for legacy in ("Extra needs", "Horizon, days", "Record a stocktake", "Depletion evidence", "Build replenishment plan"):
         assert legacy not in text
     assert '<script src="/assets/app.js" defer></script>' in text
@@ -181,6 +184,14 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert b"pendingStocktakes" in js_body["body"]
     assert b"savePendingStocktakes" in js_body["body"]
     assert b"await saveStocktake" not in js_body["body"]
+    assert b"SHOPPING_STATUS" in js_body["body"]
+    assert b"finishShoppingSession" in js_body["body"]
+    assert b"confirmedPlanEvents" in js_body["body"]
+    assert b"legacyEventsBySku" in js_body["body"]
+    assert b"persistShoppingSession();" in js_body["body"]
+    assert b"confirmedPlanEventIds" not in js_body["body"]
+    assert b"confirmedPlanSkuIds" not in js_body["body"]
+    assert "Купил(а)" not in js_body["body"].decode("utf-8")
     assert b".style" not in js_body["body"]
 
     reset_start, reset_body = asyncio.run(

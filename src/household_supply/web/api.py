@@ -13,6 +13,9 @@ from household_supply.application import (
 from household_supply.domain import CatalogSnapshot
 
 
+_MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
+
+
 def _quantity(value) -> dict[str, str]:
     return {"amount": str(value.amount), "unit": value.unit}
 
@@ -50,6 +53,75 @@ def serialize_web_catalog(catalog: CatalogSnapshot) -> dict[str, Any]:
             for sku in sorted(catalog.skus, key=lambda sku: sku.id)
         ],
     }
+
+
+def _item_names(catalog: CatalogSnapshot) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for sku in catalog.skus:
+        names.setdefault(sku.item.id, sku.item.canonical_name)
+    return names
+
+
+def _humanize_infeasible_result(
+    result: Mapping[str, Any], catalog: CatalogSnapshot
+) -> dict[str, Any]:
+    """Translate planner diagnostics only at the browser presentation boundary."""
+
+    browser_result = dict(result)
+    if browser_result.get("status") == "feasible":
+        return browser_result
+
+    if browser_result.get("minimum_required_cost") is not None:
+        return browser_result
+
+    raw_reasons = browser_result.get("infeasibility_reasons")
+    reasons = list(raw_reasons) if isinstance(raw_reasons, (list, tuple)) else []
+    missing_item_ids: list[str] = []
+    for reason in reasons:
+        if not isinstance(reason, str) or not reason.startswith(_MISSING_OFFER_PREFIX):
+            continue
+        item_id = reason[len(_MISSING_OFFER_PREFIX) :].strip()
+        if item_id:
+            missing_item_ids.append(item_id)
+
+    if missing_item_ids:
+        names = _item_names(catalog)
+        labels = [names.get(item_id, item_id) for item_id in missing_item_ids]
+        browser_result["infeasibility_reasons"] = [
+            "Сейчас не удалось найти подходящее предложение для: "
+            + ", ".join(labels)
+            + ". Попробуйте обновить цены, изменить количество или убрать этот продукт "
+            "из обязательных покупок."
+        ]
+    elif reasons:
+        browser_result["infeasibility_reasons"] = [
+            "Текущие ограничения не позволяют составить полный список покупок. "
+            "Попробуйте изменить обязательные продукты или количество и рассчитать снова."
+        ]
+
+    return browser_result
+
+
+def _humanize_plan_record(
+    record: Mapping[str, Any], catalog: CatalogSnapshot
+) -> dict[str, Any]:
+    browser_record = dict(record)
+    result = browser_record.get("result")
+    if isinstance(result, Mapping):
+        browser_record["result"] = _humanize_infeasible_result(result, catalog)
+    return browser_record
+
+
+def _humanize_browser_response(
+    response: JsonApiResponse, catalog: CatalogSnapshot
+) -> JsonApiResponse:
+    body = dict(response.body)
+    plan = body.get("plan")
+    if isinstance(plan, Mapping):
+        body["plan"] = _humanize_plan_record(plan, catalog)
+    elif isinstance(body.get("result"), Mapping):
+        body = _humanize_plan_record(body, catalog)
+    return JsonApiResponse(response.status, body)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,4 +211,6 @@ class HouseholdWebJsonApi:
                 },
             )
 
-        return self.api.handle(method, path, payload)
+        return _humanize_browser_response(
+            self.api.handle(method, path, payload), self.catalog
+        )

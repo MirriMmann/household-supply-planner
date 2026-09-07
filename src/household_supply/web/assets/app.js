@@ -645,18 +645,35 @@ function buildCoverageReason(record, context) {
     item.append(title, detail);
     nodes.push(item);
   }
+  
   if (!nodes.length && result.status !== "feasible") {
-    const item = document.createElement("article");
-    item.className = "explanation-item";
-    const title = document.createElement("strong");
-    title.textContent = "Не удалось подобрать набор покупок";
-    const detail = document.createElement("small");
-    detail.textContent = result.minimum_required_cost
-      ? `Для выполнения всех потребностей нужно минимум около ${moneyText(result.minimum_required_cost)}.`
-      : "Попробуйте увеличить бюджет или изменить обязательные продукты.";
-    item.append(title, detail);
-    nodes.push(item);
+  const item = document.createElement("article");
+  item.className = "explanation-item";
+
+  const title = document.createElement("strong");
+  title.textContent = "Не удалось составить план";
+
+  const detail = document.createElement("small");
+
+  const reasons = result.infeasibility_reasons || [];
+  const explanations = result.explanation || [];
+
+  if (result.minimum_required_cost) {
+    detail.textContent =
+      `Для выполнения всех потребностей нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
+  } else if (reasons.length) {
+    detail.textContent = reasons.join(" ");
+  } else if (explanations.length) {
+    detail.textContent = explanations.join(" ");
+  } else {
+    detail.textContent =
+      "Попробуйте увеличить бюджет или изменить обязательные продукты.";
   }
+
+  item.append(title, detail);
+  nodes.push(item);
+}
+
   return nodes;
 }
 
@@ -680,14 +697,32 @@ function renderPlan(record, context = null) {
 
   const purchases = byId("purchase-list");
   purchases.replaceChildren();
+
   if (!(result.purchases || []).length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.textContent = feasible
-      ? "Похоже, сейчас ничего докупать не нужно."
-      : "С этим бюджетом не получилось подобрать все нужные покупки.";
-    purchases.appendChild(empty);
+  const empty = document.createElement("div");
+  empty.className = "empty-state";
+
+  if (feasible) {
+    empty.textContent = "Похоже, сейчас ничего докупать не нужно.";
+  } else {
+    const reasons = result.infeasibility_reasons || [];
+    const explanations = result.explanation || [];
+
+    if (result.minimum_required_cost) {
+      empty.textContent =
+        `С этим бюджетом план не помещается. Нужно минимум около ${moneyText(result.minimum_required_cost)}.`;
+    } else if (reasons.length) {
+      empty.textContent = reasons.join(" ");
+    } else if (explanations.length) {
+      empty.textContent = explanations.join(" ");
+    } else {
+      empty.textContent =
+        "Не удалось составить план. Попробуйте увеличить бюджет или изменить обязательные покупки.";
+    }
   }
+
+  purchases.appendChild(empty);
+}
 
   for (const purchase of result.purchases || []) {
     const card = document.createElement("article");

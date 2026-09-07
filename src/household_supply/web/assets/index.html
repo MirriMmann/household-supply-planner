@@ -123,10 +123,18 @@
       <div class="section-heading page-heading">
         <span class="section-kicker">ВАШ ДОМ</span>
         <h1 id="home-title">Что есть дома</h1>
-        <p>Не нужно считать идеально. Выберите ближайший вариант — этого достаточно, чтобы начать.</p>
+        <p>Отметьте только то, что изменилось. Один тап выбирает точный остаток, затем сохраните всё одним действием.</p>
       </div>
 
       <div id="home-items" class="home-items"></div>
+
+      <div id="stocktake-actions" class="stocktake-actions hidden" aria-live="polite">
+        <strong id="stocktake-pending-label">Изменено товаров: 0</strong>
+        <div class="stocktake-actions-controls">
+          <button id="discard-pending-stocktakes" class="text-button" type="button">Отменить</button>
+          <button id="save-pending-stocktakes" class="primary-button" type="button">Сохранить изменения</button>
+        </div>
+      </div>
 
       <details class="secondary-operation">
         <summary>Купили что-то без списка?</summary>

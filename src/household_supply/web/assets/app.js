@@ -9,6 +9,8 @@ const state = {
   activePlan: null,
   activeContext: null,
   mustHaves: new Map(),
+  pendingStocktakes: new Map(),
+  savingStocktakes: false,
   view: "shopping",
 };
 
@@ -374,6 +376,39 @@ function collectMustHaves() {
   return needs;
 }
 
+function sameQuantity(left, right) {
+  if (!left || !right || left.unit !== right.unit) return false;
+  return decimalText(left.amount) === decimalText(right.amount);
+}
+
+function queueStocktake(itemId, quantity) {
+  const balance = balanceForItem(itemId);
+  if (balance && sameQuantity(balance.quantity, quantity)) {
+    state.pendingStocktakes.delete(itemId);
+  } else {
+    state.pendingStocktakes.set(itemId, {
+      quantity,
+      eventId: null,
+    });
+  }
+  renderHome();
+}
+
+function renderStocktakeActions() {
+  const actions = byId("stocktake-actions");
+  const count = state.pendingStocktakes.size;
+  actions.classList.toggle("hidden", count === 0);
+  byId("stocktake-pending-label").textContent = `Изменено товаров: ${count}`;
+
+  const discard = byId("discard-pending-stocktakes");
+  const save = byId("save-pending-stocktakes");
+  discard.disabled = state.savingStocktakes;
+  save.disabled = state.savingStocktakes || count === 0;
+  save.textContent = state.savingStocktakes
+    ? "Сохраняем…"
+    : `Сохранить изменения (${count})`;
+}
+
 function renderHome() {
   const container = byId("home-items");
   container.replaceChildren();
@@ -381,10 +416,11 @@ function renderHome() {
     const sku = primarySku(item.item_id);
     if (!sku) continue;
     const balance = balanceForItem(item.item_id);
-    const report = reportForItem(item.item_id);
+    const pending = state.pendingStocktakes.get(item.item_id) || null;
 
     const card = document.createElement("article");
     card.className = "home-card";
+    card.classList.toggle("pending", Boolean(pending));
     const top = document.createElement("div");
     top.className = "home-card-top";
 
@@ -397,65 +433,67 @@ function renderHome() {
     const name = document.createElement("strong");
     name.textContent = item.name;
     const pack = document.createElement("small");
-    pack.textContent = `Одна упаковка: ${humanQuantity(sku.package_quantity)}`;
+    pack.textContent = `1 уп. = ${humanQuantity(sku.package_quantity)}`;
     copy.append(name, pack);
     titleBlock.append(emoji, copy);
 
     const current = document.createElement("div");
     current.className = "home-current";
-    current.textContent = balance
-      ? (Number(balance.quantity.amount) === 0 ? "Нет дома" : humanQuantity(balance.quantity))
-      : "Пока не отмечено";
+    current.classList.toggle("pending", Boolean(pending));
+    if (pending) {
+      current.textContent = `Будет ${humanQuantity(pending.quantity)}`;
+    } else {
+      current.textContent = balance
+        ? (Number(balance.quantity.amount) === 0 ? "Нет дома" : humanQuantity(balance.quantity))
+        : "Не отмечено";
+    }
     top.append(titleBlock, current);
     card.appendChild(top);
-
-    const hint = document.createElement("p");
-    hint.className = "home-learning-hint";
-    const recurringReady = report?.recurring_admission?.status === "accepted";
-    if (report?.estimate && recurringReady) {
-      hint.textContent = `Обычно заканчивается примерно по ${humanQuantity(report.estimate.daily_quantity)} в день.`;
-    } else if (report?.estimate) {
-      hint.textContent = "Есть первые данные о расходе, но пока рано использовать их для прогноза.";
-    } else if (balance) {
-      hint.textContent = "Обновите остаток позже ещё раз — система собирает данные о том, как быстро это заканчивается.";
-    } else {
-      hint.textContent = "Выберите примерно, сколько сейчас осталось.";
-    }
-    card.appendChild(hint);
 
     const choices = document.createElement("div");
     choices.className = "quick-stocktake";
     const countUnit = ["pcs", "piece", "pieces", "unit"].includes(sku.package_quantity.unit);
     const presets = countUnit
       ? [
-          ["Нет", 0, 1],
-          ["1 упаковка", 1, 1],
-          ["2 упаковки", 2, 1],
-          ["5 упаковок", 5, 1],
+          ["Нет", 0, 1, "нет дома"],
+          ["1", 1, 1, "1 упаковка"],
+          ["2", 2, 1, "2 упаковки"],
+          ["5", 5, 1, "5 упаковок"],
         ]
       : [
-          ["Нет", 0, 1],
-          ["Половина", 1, 2],
-          ["1 упаковка", 1, 1],
-          ["2 упаковки", 2, 1],
+          ["Нет", 0, 1, "нет дома"],
+          ["½", 1, 2, "половина упаковки"],
+          ["1", 1, 1, "1 упаковка"],
+          ["2", 2, 1, "2 упаковки"],
         ];
 
-    for (const [label, numerator, denominator] of presets) {
+    let pendingMatchesPreset = false;
+    for (const [label, numerator, denominator, accessibleLabel] of presets) {
+      const amount = scaleDecimalText(sku.package_quantity.amount, numerator, denominator);
+      const quantity = { amount, unit: sku.package_quantity.unit };
+      const selected = Boolean(pending && sameQuantity(pending.quantity, quantity));
+      pendingMatchesPreset ||= selected;
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = "stock-choice";
+      button.classList.toggle("selected", selected);
       button.textContent = label;
-      button.addEventListener("click", async () => {
-        const amount = scaleDecimalText(sku.package_quantity.amount, numerator, denominator);
-        await saveStocktake(item.item_id, { amount, unit: sku.package_quantity.unit }, button);
-      });
+      button.disabled = state.savingStocktakes;
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+      button.setAttribute("aria-label", `${item.name}: ${accessibleLabel}`);
+      button.addEventListener("click", () => queueStocktake(item.item_id, quantity));
       choices.appendChild(button);
     }
 
     const other = document.createElement("button");
     other.type = "button";
     other.className = "stock-choice";
-    other.textContent = "Другое";
+    other.classList.toggle("selected", Boolean(pending) && !pendingMatchesPreset);
+    other.textContent = "…";
+    other.title = "Другое количество";
+    other.disabled = state.savingStocktakes;
+    other.setAttribute("aria-label", `${item.name}: другое количество`);
     choices.appendChild(other);
     card.appendChild(choices);
 
@@ -463,62 +501,84 @@ function renderHome() {
     custom.className = "custom-stocktake";
     const label = document.createElement("label");
     const labelText = document.createElement("span");
-    labelText.textContent = "Сколько осталось";
+    labelText.textContent = "Точный остаток";
     const input = document.createElement("input");
     input.inputMode = "decimal";
     input.autocomplete = "off";
     input.placeholder = "например, 0,7";
     input.required = true;
+    input.disabled = state.savingStocktakes;
     label.append(labelText, input);
     const unit = document.createElement("span");
     unit.className = "custom-unit";
     unit.textContent = unitLabel(sku.package_quantity.unit);
-    const save = document.createElement("button");
-    save.type = "submit";
-    save.className = "secondary-button";
-    save.textContent = "Сохранить";
-    custom.append(label, unit, save);
+    const choose = document.createElement("button");
+    choose.type = "submit";
+    choose.className = "secondary-button";
+    choose.textContent = "Выбрать";
+    choose.disabled = state.savingStocktakes;
+    custom.append(label, unit, choose);
     other.addEventListener("click", () => {
       custom.classList.toggle("visible");
+      other.setAttribute("aria-expanded", custom.classList.contains("visible") ? "true" : "false");
       if (custom.classList.contains("visible")) input.focus();
     });
-    custom.addEventListener("submit", async (event) => {
+    custom.addEventListener("submit", (event) => {
       event.preventDefault();
       const amount = normalizeNumberInput(input.value);
       if (!amount) return;
-      await saveStocktake(item.item_id, { amount, unit: sku.package_quantity.unit }, save, custom);
-      input.value = "";
-      custom.classList.remove("visible");
+      queueStocktake(item.item_id, { amount, unit: sku.package_quantity.unit });
     });
     card.appendChild(custom);
     container.appendChild(card);
   }
+  renderStocktakeActions();
 }
 
-async function saveStocktake(itemId, quantity, trigger, form = null) {
-  const operationKey = `${itemId}:${quantity.amount}:${quantity.unit}`;
-  const eventIdentifier = form
-    ? formEventId(form, "stocktake")
-    : elementEventId(trigger, "stocktake", operationKey);
+async function savePendingStocktakes() {
+  if (state.savingStocktakes || state.pendingStocktakes.size === 0) return;
+
+  state.savingStocktakes = true;
+  renderHome();
+
+  let saved = 0;
+  let failure = null;
+  const entries = [...state.pendingStocktakes.entries()];
+
+  for (const [itemId, pending] of entries) {
+    if (!pending.eventId) pending.eventId = eventId("stocktake");
+    try {
+      const response = await request("/household/stocktakes", {
+        method: "POST",
+        body: JSON.stringify({
+          event_id: pending.eventId,
+          item_id: itemId,
+          quantity: pending.quantity,
+          reason: "browser rapid stock update",
+        }),
+      });
+      state.pendingStocktakes.delete(itemId);
+      if (response.household) state.household = response.household;
+      saved += 1;
+    } catch (error) {
+      failure = error;
+      break;
+    }
+  }
+
+  state.savingStocktakes = false;
   try {
-    trigger.disabled = true;
-    await request("/household/stocktakes", {
-      method: "POST",
-      body: JSON.stringify({
-        event_id: eventIdentifier,
-        item_id: itemId,
-        quantity,
-        reason: "browser stock update",
-      }),
-    });
-    if (form) clearFormEventId(form);
-    else clearElementEventId(trigger);
-    showToast(`${itemName(itemId)}: остаток обновлён.`);
     await refreshOperationalState();
   } catch (error) {
-    showToast(friendlyError(error), true);
-  } finally {
-    trigger.disabled = false;
+    failure ||= error;
+    renderHome();
+  }
+
+  if (failure) {
+    const progress = saved ? `Сохранено изменений: ${saved}. ` : "";
+    showToast(`${progress}${friendlyError(failure)}`, true);
+  } else {
+    showToast(`Запасы обновлены. Сохранено изменений: ${saved}.`);
   }
 }
 
@@ -863,6 +923,12 @@ for (const button of document.querySelectorAll("[data-view]")) {
 
 byId("start-home-setup").addEventListener("click", () => setView("home"));
 byId("product-search").addEventListener("input", renderProductPicker);
+byId("discard-pending-stocktakes").addEventListener("click", () => {
+  if (state.savingStocktakes) return;
+  state.pendingStocktakes.clear();
+  renderHome();
+});
+byId("save-pending-stocktakes").addEventListener("click", savePendingStocktakes);
 
 for (const button of document.querySelectorAll("[data-days]")) {
   button.addEventListener("click", () => {

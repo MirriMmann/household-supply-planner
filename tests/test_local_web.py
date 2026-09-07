@@ -161,6 +161,9 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert 'lang="ru"' in text
     assert "Что есть дома" in text
     assert "Нужно что-то обязательно?" in text
+    assert 'id="stocktake-actions"' in text
+    assert 'id="save-pending-stocktakes"' in text
+    assert 'id="discard-pending-stocktakes"' in text
     for legacy in ("Extra needs", "Horizon, days", "Record a stocktake", "Depletion evidence", "Build replenishment plan"):
         assert legacy not in text
     assert '<script src="/assets/app.js" defer></script>' in text
@@ -175,6 +178,9 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert b"/plans/" in js_body["body"]
     assert b"sessionStorage" in js_body["body"]
     assert b"formEventId" in js_body["body"]
+    assert b"pendingStocktakes" in js_body["body"]
+    assert b"savePendingStocktakes" in js_body["body"]
+    assert b"await saveStocktake" not in js_body["body"]
     assert b".style" not in js_body["body"]
 
     reset_start, reset_body = asyncio.run(

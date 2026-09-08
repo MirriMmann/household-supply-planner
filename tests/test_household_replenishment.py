@@ -391,6 +391,29 @@ def test_replenishment_json_api_creates_explainable_persisted_plan() -> None:
     assert stored.body["request"]["decision_basis"] == response.body["plan"]["request"]["decision_basis"]
 
 
+def test_replenishment_json_api_accepts_arbitrary_horizon() -> None:
+    service, _ = make_replenishment_service()
+    api = HouseholdReplenishmentJsonApi(service)
+    response = api.handle(
+        "POST",
+        "/plans",
+        {
+            "budget": {"amount": "1000", "currency": "KGS"},
+            "horizon_days": "10",
+        },
+    )
+
+    assert response.status == 201
+    assert response.body["household"]["demand"]["horizon_days"] == "10"
+    assert response.body["household"]["demand"]["demands"] == [
+        {
+            "item_id": "milk",
+            "quantity": {"amount": "4000.000000000000", "unit": "ml"},
+        }
+    ]
+    assert response.body["plan"]["request"]["decision_basis"]["horizon_days"] == "10"
+
+
 def test_replenishment_json_contract_is_strict_and_exact() -> None:
     with pytest.raises(Exception, match="float is not accepted"):
         parse_household_replenishment_payload(

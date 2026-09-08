@@ -57,12 +57,54 @@
 
         <form id="plan-form" class="planner-form">
           <fieldset class="field-group">
-            <legend>На сколько дней закупаемся?</legend>
-            <div class="choice-row" id="horizon-choices">
-              <button type="button" class="choice-chip" data-days="3">3 дня</button>
-              <button type="button" class="choice-chip selected" data-days="7">7 дней</button>
-              <button type="button" class="choice-chip" data-days="14">14 дней</button>
+            <legend>На какой период нужны покупки?</legend>
+            <div class="choice-row horizon-choice-grid" id="horizon-choices">
+              <button type="button" class="choice-chip horizon-choice" data-days="1">
+                <span>На день</span>
+                <small>1 день</small>
+              </button>
+              <button type="button" class="choice-chip horizon-choice" data-days="3">
+                <span>На пару дней</span>
+                <small>3 дня</small>
+              </button>
+              <button type="button" class="choice-chip horizon-choice selected" data-days="7">
+                <span>На неделю</span>
+                <small>7 дней</small>
+              </button>
+              <button type="button" class="choice-chip horizon-choice" data-days="30">
+                <span>На месяц</span>
+                <small>30 дней</small>
+              </button>
             </div>
+
+            <button
+              id="custom-horizon-toggle"
+              class="text-button horizon-custom-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="custom-horizon-field"
+            >
+              Другой период
+            </button>
+
+            <div id="custom-horizon-field" class="custom-horizon-field hidden">
+              <label for="custom-horizon-days">Сколько дней?</label>
+              <span class="input-with-suffix horizon-input">
+                <input
+                  id="custom-horizon-days"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  placeholder="10"
+                  aria-describedby="custom-horizon-help"
+                >
+                <strong>дней</strong>
+              </span>
+              <small id="custom-horizon-help">Введите целое число дней.</small>
+            </div>
+
             <input id="plan-horizon" type="hidden" value="7">
           </fieldset>
 

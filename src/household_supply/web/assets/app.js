@@ -1392,14 +1392,104 @@ byId("finish-shopping").addEventListener("click", () => {
   if (state.activePlan) finishShoppingSession(state.activePlan);
 });
 
-for (const button of document.querySelectorAll("[data-days]")) {
-  button.addEventListener("click", () => {
-    byId("plan-horizon").value = button.dataset.days;
-    for (const choice of document.querySelectorAll("[data-days]")) {
-      choice.classList.toggle("selected", choice === button);
-    }
-  });
+function parseHorizonDays(value) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const days = Number(raw);
+  if (!Number.isSafeInteger(days) || days < 1) return null;
+  return days;
 }
+
+function setHorizonPreset(button) {
+  const days = parseHorizonDays(button.dataset.days);
+  if (days === null) return;
+
+  byId("plan-horizon").value = String(days);
+  for (const choice of document.querySelectorAll("[data-days]")) {
+    choice.classList.toggle("selected", choice === button);
+  }
+
+  const customField = byId("custom-horizon-field");
+  const customToggle = byId("custom-horizon-toggle");
+  const customInput = byId("custom-horizon-days");
+  customField.classList.add("hidden");
+  customField.classList.remove("selected");
+  customToggle.classList.remove("selected");
+  customToggle.setAttribute("aria-expanded", "false");
+  customToggle.textContent = "Другой период";
+  customInput.setCustomValidity("");
+}
+
+function toggleCustomHorizon() {
+  const customField = byId("custom-horizon-field");
+  const customToggle = byId("custom-horizon-toggle");
+  const customInput = byId("custom-horizon-days");
+  const opening = customField.classList.contains("hidden");
+
+  if (!opening) {
+    const selectedPreset = document.querySelector("[data-days].selected");
+    if (selectedPreset) customInput.setCustomValidity("");
+    customField.classList.add("hidden");
+    customToggle.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  customField.classList.remove("hidden");
+  customToggle.setAttribute("aria-expanded", "true");
+
+  const days = parseHorizonDays(customInput.value);
+  if (days !== null) {
+    byId("plan-horizon").value = String(days);
+    for (const choice of document.querySelectorAll("[data-days]")) {
+      choice.classList.remove("selected");
+    }
+    customField.classList.add("selected");
+    customToggle.classList.add("selected");
+    customToggle.textContent = `Другой период · ${dayText(days)}`;
+  } else {
+    customField.classList.remove("selected");
+    customToggle.classList.remove("selected");
+    customToggle.textContent = "Другой период";
+  }
+
+  window.setTimeout(() => customInput.focus(), 0);
+}
+
+function updateCustomHorizon() {
+  const customInput = byId("custom-horizon-days");
+  const customField = byId("custom-horizon-field");
+  const customToggle = byId("custom-horizon-toggle");
+  const days = parseHorizonDays(customInput.value);
+  const hasValue = customInput.value.trim() !== "";
+  const selectedPreset = document.querySelector("[data-days].selected");
+
+  if (days === null) {
+    customInput.setCustomValidity(
+      hasValue ? "Введите целое количество дней от 1." : "",
+    );
+    if (!selectedPreset) byId("plan-horizon").value = "";
+    customField.classList.remove("selected");
+    customToggle.classList.remove("selected");
+    customToggle.textContent = "Другой период";
+    return;
+  }
+
+  customInput.setCustomValidity("");
+  byId("plan-horizon").value = String(days);
+  for (const choice of document.querySelectorAll("[data-days]")) {
+    choice.classList.remove("selected");
+  }
+  customField.classList.add("selected");
+  customToggle.classList.add("selected");
+  customToggle.textContent = `Другой период · ${dayText(days)}`;
+}
+
+for (const button of document.querySelectorAll("[data-days]")) {
+  button.addEventListener("click", () => setHorizonPreset(button));
+}
+
+byId("custom-horizon-toggle").addEventListener("click", toggleCustomHorizon);
+byId("custom-horizon-days").addEventListener("input", updateCustomHorizon);
 
 for (const button of document.querySelectorAll("[data-step-target]")) {
   button.addEventListener("click", () => {
@@ -1441,11 +1531,24 @@ byId("plan-form").addEventListener("submit", async (event) => {
   const button = byId("build-plan-button");
   try {
     button.disabled = true;
+    const horizonDays = parseHorizonDays(byId("plan-horizon").value);
+    if (horizonDays === null) {
+      const customField = byId("custom-horizon-field");
+      const customToggle = byId("custom-horizon-toggle");
+      const customInput = byId("custom-horizon-days");
+      customField.classList.remove("hidden");
+      customToggle.classList.add("selected");
+      customToggle.setAttribute("aria-expanded", "true");
+      customInput.setCustomValidity("Введите целое количество дней от 1.");
+      customInput.reportValidity();
+      throw new Error("Укажите период целым числом дней.");
+    }
+
     const budget = normalizeNumberInput(byId("plan-budget").value);
     if (!budget) throw new Error("Укажите бюджет.");
     const payload = {
       budget: { amount: budget, currency: byId("plan-currency").value },
-      horizon_days: byId("plan-horizon").value,
+      horizon_days: String(horizonDays),
       explicit_needs: collectMustHaves(),
     };
     const response = await request("/plans", { method: "POST", body: JSON.stringify(payload) });

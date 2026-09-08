@@ -137,6 +137,57 @@ p { color: var(--muted); line-height: 1.52; }
   font-weight: 750;
 }
 .choice-chip.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-dark); box-shadow: 0 0 0 2px rgba(23,107,75,.08); }
+.horizon-choice-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.horizon-choice {
+  min-height: 72px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 3px;
+  padding: 11px 13px;
+  text-align: left;
+}
+.horizon-choice span { font-size: .9rem; font-weight: 800; line-height: 1.2; }
+.horizon-choice small { color: var(--muted); font-size: .74rem; font-weight: 700; }
+.horizon-choice.selected small { color: var(--accent-dark); opacity: .76; }
+.horizon-custom-toggle {
+  justify-self: start;
+  margin-top: 8px;
+  padding: 7px 9px;
+}
+.horizon-custom-toggle.selected {
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+.custom-horizon-field {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+.custom-horizon-field.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.custom-horizon-field > label {
+  color: var(--text);
+  font-size: .84rem;
+  font-weight: 760;
+}
+.custom-horizon-field > small {
+  color: var(--muted);
+  font-size: .75rem;
+}
+.horizon-input { width: min(220px, 100%); }
+.horizon-input input {
+  padding-right: 72px;
+  font-size: 1.02rem;
+  font-weight: 780;
+}
 .large-field { display: grid; }
 .input-with-suffix { position: relative; display: block; }
 .input-with-suffix input { padding-right: 66px; font-size: 1.18rem; font-weight: 780; }
@@ -407,6 +458,9 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
   .welcome-card { grid-template-columns: auto 1fr; }
   .welcome-card .secondary-button { grid-column: 1 / -1; width: 100%; }
   .product-picker { grid-template-columns: 1fr 1fr; }
+  .horizon-choice-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .horizon-choice { min-height: 70px; }
+  .horizon-input { width: 100%; }
   .need-choice { grid-template-columns: 1fr auto; }
   .need-choice .text-button { grid-column: 1 / -1; justify-self: end; }
   .quick-stocktake { grid-template-columns: repeat(5, minmax(0, 1fr)); }

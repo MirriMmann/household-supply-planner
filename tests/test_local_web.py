@@ -168,6 +168,14 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert 'id="finish-shopping"' in text
     assert "shopping state" in text
     assert "Почему такой план?" in text
+    assert "На какой период нужны покупки?" in text
+    for label in ("На день", "На пару дней", "На неделю", "На месяц", "Другой период"):
+        assert label in text
+    for days in ("1", "3", "7", "30"):
+        assert f'data-days="{days}"' in text
+    assert 'id="custom-horizon-toggle"' in text
+    assert 'id="custom-horizon-field"' in text
+    assert 'id="custom-horizon-days"' in text
     for legacy in ("Extra needs", "Horizon, days", "Record a stocktake", "Depletion evidence", "Build replenishment plan"):
         assert legacy not in text
     assert '<script src="/assets/app.js" defer></script>' in text
@@ -187,6 +195,10 @@ def test_local_web_serves_fixed_assets_with_browser_security_headers() -> None:
     assert b"await saveStocktake" not in js_body["body"]
     assert b"SHOPPING_STATUS" in js_body["body"]
     assert b"finishShoppingSession" in js_body["body"]
+    assert b"parseHorizonDays" in js_body["body"]
+    assert b"toggleCustomHorizon" in js_body["body"]
+    assert b"updateCustomHorizon" in js_body["body"]
+    assert b'horizon_days: String(horizonDays)' in js_body["body"]
     assert b"decision_basis" in js_body["body"]
     assert b"recurring_estimates" in js_body["body"]
     assert "Старый сохранённый план" in js_body["body"].decode("utf-8")
@@ -375,7 +387,12 @@ def test_mass_market_russian_ux_contract_has_no_primary_unit_selector() -> None:
     start, body = asyncio.run(asgi_request(app, method="GET", path="/"))
     assert start["status"] == 200
     text = body["body"].decode("utf-8")
-    assert "На сколько дней закупаемся?" in text
+    assert "На какой период нужны покупки?" in text
+    assert "На день" in text
+    assert "На пару дней" in text
+    assert "На неделю" in text
+    assert "На месяц" in text
+    assert "Другой период" in text
     assert "Сколько готовы потратить?" in text
     assert "Найти продукт" in text
     assert "Отметить запасы" in text

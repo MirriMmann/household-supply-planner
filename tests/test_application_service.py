@@ -112,6 +112,30 @@ def test_application_service_runs_market_to_planner_vertical_slice() -> None:
     assert result.market_compilation.snapshot.captured_at == NOW
     assert len(result.market_compilation.snapshot.offers) == 2
 
+def test_application_service_converts_market_prices_to_budget_currency() -> None:
+    request = ApplicationPlanRequest(
+        demands=(
+            RequestedItem("milk", Quantity(1500, "ml")),
+            RequestedItem("oil", Quantity(500, "ml")),
+        ),
+        inventory=(InventoryInput("milk-open", "milk", Quantity(500, "ml")),),
+        budget=Money(2000, "KZT"),
+    )
+
+    result = make_service().plan(request)
+
+    assert result.plan.status.value == "feasible"
+    assert result.plan.total_cost == Money(1705, "KZT")
+    assert result.plan.budget_remaining == Money(295, "KZT")
+    assert result.plan.objective_breakdown is not None
+    assert result.plan.objective_breakdown.total_score == Money(1705, "KZT")
+
+    offer_prices = {
+        offer.sku.id: offer.price
+        for offer in result.market_compilation.snapshot.offers
+    }
+    assert offer_prices["milk-1l"] == Money("660", "KZT")
+    assert offer_prices["oil-1l"] == Money("1045", "KZT")
 
 def test_application_request_defaults_to_exact_zero_objective_policy() -> None:
     result = make_service().plan(make_request())

@@ -112,14 +112,10 @@
             <span>Сколько готовы потратить?</span>
             <span class="input-with-suffix">
               <input id="plan-budget" inputmode="decimal" autocomplete="off" value="3000" required>
-              <select id="plan-currency" aria-label="Валюта бюджета">
-                <option value="KGS">сом</option>
-                <option value="KZT">тенге</option>
-                <option value="USD">доллар</option>
-                <option value="EUR">евро</option>
-              </select>
+              <strong>сом</strong>
             </span>
           </label>
+          <input id="plan-currency" type="hidden" value="KGS">
 
           <div class="must-have-block">
             <div class="subheading-row">
@@ -181,6 +177,13 @@
         <h1 id="home-title">Что есть дома</h1>
         <p>Отметьте только то, что изменилось. Один тап выбирает точный остаток, затем сохраните всё одним действием.</p>
       </div>
+
+      <div class="home-filter-bar">
+        <span id="home-filter-summary" class="home-filter-summary" aria-live="polite"></span>
+        <button id="home-filter-toggle" class="text-button hidden" type="button" aria-pressed="false">Все товары</button>
+      </div>
+
+      <p id="home-check-summary" class="home-check-summary hidden" aria-live="polite"></p>
 
       <div id="home-items" class="home-items"></div>
 

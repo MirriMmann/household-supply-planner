@@ -11,6 +11,7 @@ const state = {
   mustHaves: new Map(),
   pendingStocktakes: new Map(),
   savingStocktakes: false,
+  showAllStockItems: false,
   shoppingSession: null,
   shoppingConfirming: false,
   view: "shopping",
@@ -412,10 +413,120 @@ function renderStocktakeActions() {
     : `Сохранить изменения (${count})`;
 }
 
+function confirmedStockItemIds() {
+  // Only confirmed household evidence activates focus. Pending updates must
+  // not collapse a first-time user's full catalog during their first batch.
+  const confirmed = new Set(
+    (state.household?.balances || []).map((balance) => balance.item_id),
+  );
+  for (const event of state.history) {
+    if (["inventory_correction", "purchase"].includes(event.event_type) && event.item?.id) {
+      confirmed.add(event.item.id);
+    }
+  }
+  return confirmed;
+}
+
+function trackedStockItemIds(confirmed = confirmedStockItemIds()) {
+  const tracked = new Set(confirmed);
+  // Keep unsaved selections visible inside an already focused household.
+  for (const itemId of state.pendingStocktakes.keys()) tracked.add(itemId);
+  return tracked;
+}
+
+// These are verification prompts, not inferred quantities or household facts.
+// Use the household server's as_of timestamp rather than an untrusted device clock.
+function stockVerificationHints(asOf, history, reports, confirmedIds) {
+  const now = Date.parse(asOf || "");
+  const hints = new Map();
+  if (!Number.isFinite(now)) return hints;
+
+  const latestChecks = new Map();
+  for (const event of history) {
+    if (event.event_type !== "inventory_correction" || !event.item?.id) continue;
+    const timestamp = Date.parse(event.body?.occurred_at || "");
+    if (!Number.isFinite(timestamp) || timestamp > now) continue;
+    const itemId = event.item.id;
+    if (timestamp > (latestChecks.get(itemId) ?? -Infinity)) {
+      latestChecks.set(itemId, timestamp);
+    }
+  }
+
+  const admittedRateIds = new Set(
+    reports.filter((report) =>
+      report.estimate && report.recurring_admission?.status === "accepted"
+    ).map((report) => report.item_id),
+  );
+
+  for (const itemId of confirmedIds) {
+    const lastCheck = latestChecks.get(itemId);
+    if (lastCheck === undefined) {
+      // This household has purchase evidence but no actual stocktake.
+      hints.set(itemId, {
+        priority: 0,
+        description: "Ещё не сверяли остаток — стоит проверить",
+      });
+      continue;
+    }
+    const days = Math.floor((now - lastCheck) / 86400000);
+    if (days >= 7 && admittedRateIds.has(itemId)) {
+      hints.set(itemId, {
+        priority: 1,
+        description: `Проверяли ${days} дн. назад · есть история расхода`,
+      });
+    } else if (days >= 14) {
+      hints.set(itemId, {
+        priority: 2,
+        description: `Проверяли ${days} дн. назад`,
+      });
+    }
+  }
+  return hints;
+}
+
 function renderHome() {
   const container = byId("home-items");
   container.replaceChildren();
-  for (const item of state.catalog.items) {
+
+  const allItems = state.catalog.items.filter((item) => primarySku(item.item_id));
+  const confirmed = confirmedStockItemIds();
+  const tracked = trackedStockItemIds(confirmed);
+  const trackedCount = allItems.filter((item) => tracked.has(item.item_id)).length;
+  const confirmedCount = allItems.filter((item) => confirmed.has(item.item_id)).length;
+  const canFocus = confirmedCount > 0 && confirmedCount < allItems.length;
+  const showingAll = !canFocus || state.showAllStockItems;
+  const hints = stockVerificationHints(
+    state.household?.as_of, state.history, state.reports, confirmed,
+  );
+  const toggle = byId("home-filter-toggle");
+  toggle.classList.toggle("hidden", !canFocus);
+  toggle.disabled = state.savingStocktakes;
+  toggle.setAttribute("aria-pressed", String(showingAll));
+  toggle.textContent = showingAll
+    ? `Только мои товары (${trackedCount})`
+    : `Все товары (${allItems.length})`;
+  byId("home-filter-summary").textContent = showingAll
+    ? `Показаны все товары: ${allItems.length}`
+    : `Ваши товары: ${trackedCount} из ${allItems.length}`;
+
+  const visibleItems = showingAll
+    ? allItems
+    : allItems.filter((item) => tracked.has(item.item_id));
+  // Stable sort preserves catalog order for equal priorities. Pending selections
+  // do not change rank, so cards do not jump while the user is marking a batch.
+  visibleItems.sort((left, right) =>
+    (hints.get(left.item_id)?.priority ?? 9) -
+    (hints.get(right.item_id)?.priority ?? 9)
+  );
+  const suggestedCount = visibleItems.filter((item) =>
+    hints.has(item.item_id) && !state.pendingStocktakes.has(item.item_id)
+  ).length;
+  const summary = byId("home-check-summary");
+  summary.classList.toggle("hidden", suggestedCount === 0);
+  summary.textContent = suggestedCount
+    ? `Стоит проверить: ${suggestedCount}. Подсказки не меняют запасы.`
+    : "";
+  for (const item of visibleItems) {
     const sku = primarySku(item.item_id);
     if (!sku) continue;
     const balance = balanceForItem(item.item_id);
@@ -452,6 +563,14 @@ function renderHome() {
     }
     top.append(titleBlock, current);
     card.appendChild(top);
+
+    const hint = hints.get(item.item_id);
+    if (hint && !pending) {
+      const reminder = document.createElement("p");
+      reminder.className = "stock-verification-hint";
+      reminder.textContent = hint.description;
+      card.appendChild(reminder);
+    }
 
     const choices = document.createElement("div");
     choices.className = "quick-stocktake";
@@ -1388,6 +1507,11 @@ byId("discard-pending-stocktakes").addEventListener("click", () => {
   renderHome();
 });
 byId("save-pending-stocktakes").addEventListener("click", savePendingStocktakes);
+byId("home-filter-toggle").addEventListener("click", () => {
+  if (state.savingStocktakes) return;
+  state.showAllStockItems = !state.showAllStockItems;
+  renderHome();
+});
 byId("finish-shopping").addEventListener("click", () => {
   if (state.activePlan) finishShoppingSession(state.activePlan);
 });

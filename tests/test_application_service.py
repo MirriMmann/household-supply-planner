@@ -28,6 +28,7 @@ from household_supply.domain import (
     Item,
 )
 from household_supply.market import MarketCompilationPolicy, StaticMarketProvider
+from household_supply.application.lifecycle import serialize_market_evidence
 
 
 NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
@@ -37,6 +38,8 @@ def make_service(
     *,
     milk_price: str = "120",
     oil_price: str = "190",
+    price_currency: str = "KGS",
+    oil_currency: str | None = None,
     clock=lambda: NOW,
     market_policy: MarketCompilationPolicy = MarketCompilationPolicy(),
 ) -> PlanApplicationService:
@@ -63,7 +66,7 @@ def make_service(
                 provider_id="fixture",
                 seller_id="store-a",
                 external_product_id="milk-1l",
-                price=Money(milk_price, "KGS"),
+                price=Money(milk_price, price_currency),
                 observed_at=NOW,
                 package_quantity=Quantity(1, "l"),
                 source_ref="fixture://milk",
@@ -73,7 +76,7 @@ def make_service(
                 provider_id="fixture",
                 seller_id="store-a",
                 external_product_id="oil-1l",
-                price=Money(oil_price, "KGS"),
+                price=Money(oil_price, oil_currency or price_currency),
                 observed_at=NOW,
                 package_quantity=Quantity(1, "l"),
                 source_ref="fixture://oil",
@@ -112,30 +115,78 @@ def test_application_service_runs_market_to_planner_vertical_slice() -> None:
     assert result.market_compilation.snapshot.captured_at == NOW
     assert len(result.market_compilation.snapshot.offers) == 2
 
-def test_application_service_converts_market_prices_to_budget_currency() -> None:
-    request = ApplicationPlanRequest(
-        demands=(
-            RequestedItem("milk", Quantity(1500, "ml")),
-            RequestedItem("oil", Quantity(500, "ml")),
-        ),
-        inventory=(InventoryInput("milk-open", "milk", Quantity(500, "ml")),),
-        budget=Money(2000, "KZT"),
-    )
+def test_application_service_keeps_original_provider_prices_and_provenance() -> None:
+    service = make_service()
+    result = service.plan(make_request())
 
-    result = make_service().plan(request)
-
-    assert result.plan.status.value == "feasible"
-    assert result.plan.total_cost == Money(1705, "KZT")
-    assert result.plan.budget_remaining == Money(295, "KZT")
-    assert result.plan.objective_breakdown is not None
-    assert result.plan.objective_breakdown.total_score == Money(1705, "KZT")
-
-    offer_prices = {
+    assert result.market_compilation.batches == (service.providers[0].batch,)
+    prices = {
         offer.sku.id: offer.price
         for offer in result.market_compilation.snapshot.offers
     }
-    assert offer_prices["milk-1l"] == Money("660", "KZT")
-    assert offer_prices["oil-1l"] == Money("1045", "KZT")
+    assert prices == {
+        "milk-1l": Money("120", "KGS"),
+        "oil-1l": Money("190", "KGS"),
+    }
+
+    evidence = serialize_market_evidence(result.market_compilation)
+    observed = {
+        entry["id"]: entry
+        for entry in evidence["batches"][0]["observations"]
+    }
+    assert observed["obs-milk"]["price"] == {
+        "amount": "120", "currency": "KGS"
+    }
+    assert observed["obs-milk"]["source_ref"] == "fixture://milk"
+
+
+def test_application_service_ignores_undemanded_foreign_offer() -> None:
+    service = make_service(oil_currency="USD")
+    request = ApplicationPlanRequest(
+        demands=(RequestedItem("milk", Quantity(1, "l")),),
+        budget=Money("1000", "KGS"),
+    )
+    result = service.plan(request)
+
+    assert result.plan.status.value == "feasible"
+    assert result.plan.total_cost == Money("120", "KGS")
+    assert [purchase.offer.sku.id for purchase in result.plan.purchases] == ["milk-1l"]
+    assert result.market_compilation.batches == (service.providers[0].batch,)
+    assert {
+        offer.sku.id: offer.price
+        for offer in result.market_compilation.snapshot.offers
+    } == {
+        "milk-1l": Money("120", "KGS"),
+        "oil-1l": Money("190", "USD"),
+    }
+
+
+def test_application_service_foreign_only_offers_are_infeasible() -> None:
+    service = make_service()
+    request = ApplicationPlanRequest(
+        demands=(RequestedItem("milk", Quantity(1, "l")),),
+        budget=Money("2000", "KZT"),
+    )
+    result = service.plan(request)
+
+    assert result.plan.status.value == "infeasible"
+    assert result.plan.purchases == ()
+    assert result.plan.total_cost == Money.zero("KZT")
+    assert result.market_compilation.batches == (service.providers[0].batch,)
+
+
+def test_application_service_accepts_native_market_currency_without_fx() -> None:
+    request = ApplicationPlanRequest(
+        demands=(RequestedItem("milk", Quantity(1, "l")),),
+        budget=Money("2000", "KZT"),
+    )
+    service = make_service(price_currency="KZT")
+    result = service.plan(request)
+
+    assert result.plan.status.value == "feasible"
+    assert result.plan.total_cost == Money("120", "KZT")
+    assert result.market_compilation.batches == (service.providers[0].batch,)
+
 
 def test_application_request_defaults_to_exact_zero_objective_policy() -> None:
     result = make_service().plan(make_request())

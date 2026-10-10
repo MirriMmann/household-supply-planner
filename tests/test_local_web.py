@@ -398,11 +398,8 @@ def test_mass_market_russian_ux_contract_has_no_primary_unit_selector() -> None:
     assert "Отметить запасы" in text
     assert 'id="stocktake-unit"' not in text
     assert 'id="stocktake-amount"' not in text
-    assert '<select id="plan-currency"' in text
-    assert 'value="KGS"' in text
-    assert 'value="KZT"' in text
-    assert 'value="USD"' in text
-    assert 'value="EUR"' in text
+    assert 'id="plan-currency" type="hidden" value="KGS"' in text
+    assert '<select id="plan-currency"' not in text
 
     js_start, js_body = asyncio.run(asgi_request(app, method="GET", path="/assets/app.js"))
     assert js_start["status"] == 200
@@ -411,6 +408,51 @@ def test_mass_market_russian_ux_contract_has_no_primary_unit_selector() -> None:
     assert "1 упаковка" in javascript
     assert "friendlyError" in javascript
     assert "collectMustHaves" in javascript
+
+
+def test_home_stocktake_focus_only_uses_confirmed_household_evidence() -> None:
+    app = make_web_app()
+    start, html_body = asyncio.run(asgi_request(app, method="GET", path="/"))
+    assert start["status"] == 200
+    html = html_body["body"].decode("utf-8")
+    assert 'id="home-filter-summary"' in html
+    assert 'id="home-filter-toggle"' in html
+    assert 'id="home-items"' in html
+
+    start, js_body = asyncio.run(asgi_request(app, method="GET", path="/assets/app.js"))
+    assert start["status"] == 200
+    javascript = js_body["body"].decode("utf-8")
+    assert "confirmedStockItemIds()" in javascript
+    assert "trackedStockItemIds(confirmed)" in javascript
+    assert '["inventory_correction", "purchase"]' in javascript
+    assert "state.pendingStocktakes.keys()" in javascript
+    assert "confirmedCount > 0 && confirmedCount < allItems.length" in javascript
+    assert "state.showAllStockItems" in javascript
+    assert 'byId("home-filter-toggle").addEventListener("click"' in javascript
+    assert "renderStocktakeActions();" in javascript
+
+
+def test_stock_verification_suggestions_are_non_mutating_and_evidence_based() -> None:
+    app = make_web_app()
+    start, html_body = asyncio.run(asgi_request(app, method="GET", path="/"))
+    assert start["status"] == 200
+    assert 'id="home-check-summary"' in html_body["body"].decode("utf-8")
+
+    start, js_body = asyncio.run(asgi_request(app, method="GET", path="/assets/app.js"))
+    assert start["status"] == 200
+    script = js_body["body"].decode("utf-8")
+
+    assert "function stockVerificationHints(asOf, history, reports, confirmedIds)" in script
+    assert 'event.event_type !== "inventory_correction"' in script
+    assert 'event.body?.occurred_at' in script
+    assert 'event.occurred_at ||' not in script
+    assert "state.household?.as_of" in script
+    assert 'report.recurring_admission?.status === "accepted"' in script
+    assert "days >= 7 && admittedRateIds.has(itemId)" in script
+    assert "days >= 14" in script
+    assert 'description: "Ещё не сверяли остаток — стоит проверить"' in script
+    assert "state.pendingStocktakes.has(item.item_id)" in script
+    assert "Подсказки не меняют запасы" in script
 
 
 def test_local_web_refuses_remote_binding_by_default() -> None:

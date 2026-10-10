@@ -24,6 +24,7 @@ from household_supply.domain import CatalogSnapshot, Money, MultiObjectivePolicy
 from household_supply.domain.money import DecimalLike, as_decimal
 from household_supply.household import (
     ConsumptionEstimate,
+    HouseholdHistory,
     HouseholdLearningService,
     HouseholdState,
     RecurringNeedSource,
@@ -244,6 +245,17 @@ def compose_usual_basket(
 
 
 @dataclass(frozen=True, slots=True)
+class UsualBasketPreparedSnapshot:
+    """One consistent read of user preferences and household evidence."""
+
+    as_of: datetime
+    history: HouseholdHistory
+    basket: UsualBasket
+    estimates: tuple[ConsumptionEstimate, ...]
+    proposal: UsualBasketProposal
+
+
+@dataclass(frozen=True, slots=True)
 class UsualBasketPreparationService:
     """Read real household evidence; return a candidate without making a plan."""
 
@@ -251,6 +263,38 @@ class UsualBasketPreparationService:
     catalog: CatalogSnapshot
     basket_repository: UsualBasketRepository
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+
+    def prepare_snapshot(
+        self,
+        *,
+        budget: Money,
+        horizon_days: DecimalLike,
+        overrides: tuple[RequestedItem, ...] = (),
+        exclusions: tuple[str, ...] = (),
+        objective_policy: MultiObjectivePolicy | None = None,
+    ) -> UsualBasketPreparedSnapshot:
+        as_of = self.clock()
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise UsualBasketError("clock must be timezone-aware")
+        history = self.household.history()
+        basket = self.basket_repository.load()
+        state = project_household_state(history, as_of=as_of)
+        estimates = admitted_recurring_estimates(history, as_of=as_of)
+        proposal = compose_usual_basket(
+            basket=basket,
+            catalog=self.catalog,
+            state=state,
+            admitted_estimates=estimates,
+            budget=budget,
+            horizon_days=horizon_days,
+            overrides=overrides,
+            exclusions=exclusions,
+            objective_policy=objective_policy,
+        )
+        return UsualBasketPreparedSnapshot(
+            as_of=as_of, history=history, basket=basket,
+            estimates=estimates, proposal=proposal,
+        )
 
     def prepare(
         self,
@@ -261,20 +305,7 @@ class UsualBasketPreparationService:
         exclusions: tuple[str, ...] = (),
         objective_policy: MultiObjectivePolicy | None = None,
     ) -> UsualBasketProposal:
-        as_of = self.clock()
-        if as_of.tzinfo is None or as_of.utcoffset() is None:
-            raise UsualBasketError("clock must be timezone-aware")
-        history = self.household.history()
-        state = project_household_state(history, as_of=as_of)
-        estimates = admitted_recurring_estimates(history, as_of=as_of)
-        return compose_usual_basket(
-            basket=self.basket_repository.load(),
-            catalog=self.catalog,
-            state=state,
-            admitted_estimates=estimates,
-            budget=budget,
-            horizon_days=horizon_days,
-            overrides=overrides,
-            exclusions=exclusions,
-            objective_policy=objective_policy,
-        )
+        return self.prepare_snapshot(
+            budget=budget, horizon_days=horizon_days, overrides=overrides,
+            exclusions=exclusions, objective_policy=objective_policy,
+        ).proposal

@@ -167,7 +167,7 @@ class HouseholdWebJsonApi:
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
 
-        if target.path in {"/household/usual-basket", "/household/usual-basket/preview"}:
+        if target.path in {"/household/usual-basket", "/household/usual-basket/preview", "/household/usual-basket/confirm"}:
             if self.usual_basket_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.usual_basket_api.handle(method, path, payload)
@@ -214,6 +214,8 @@ class HouseholdWebJsonApi:
                 return JsonApiResponse(
                     500, {"error": "reset_failed", "detail": str(exc)}
                 )
+            if self.usual_basket_api is not None and self.usual_basket_api.confirmation is not None:
+                self.usual_basket_api.confirmation.discard_previews()
             return JsonApiResponse(
                 200,
                 {

@@ -20,6 +20,8 @@ const state = {
   usualBasketAvailable: false,
   usualBasketDirty: false,
   usualBasketSaving: false,
+  usualBasketPreviewId: null,
+  usualBasketPreviewRevision: 0,
 };
 
 class ApiError extends Error {
@@ -1519,9 +1521,17 @@ function usualFallbackRatio(itemId, fallback, sku) {
   return "custom";
 }
 
+function invalidateUsualBasketPreview() {
+  state.usualBasketPreviewRevision += 1;
+  state.usualBasketPreviewId = null;
+  const panel = byId("usual-basket-preview");
+  panel.replaceChildren();
+  panel.classList.add("hidden");
+}
+
 function markUsualBasketDirty() {
   state.usualBasketDirty = true;
-  byId("usual-basket-preview").classList.add("hidden");
+  invalidateUsualBasketPreview();
   renderUsualBasket();
 }
 
@@ -1646,6 +1656,7 @@ async function loadUsualBasket() {
     );
     state.usualBasketSkuChoices.clear();
     state.usualBasketDirty = false;
+    invalidateUsualBasketPreview();
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     state.usualBasketAvailable = false;
@@ -1680,11 +1691,12 @@ async function saveUsualBasket() {
 
 async function previewUsualBasket() {
   if (state.usualBasketDirty || !state.usualBasketDraft.size) return;
+  invalidateUsualBasketPreview();
+  const revision = state.usualBasketPreviewRevision;
   const button = byId("preview-usual-basket");
   button.disabled = true;
   const panel = byId("usual-basket-preview");
   panel.classList.remove("hidden");
-  panel.replaceChildren();
   try {
     const days = parseHorizonDays(byId("plan-horizon").value);
     if (days === null) throw new Error("Выберите положительный период.");
@@ -1697,6 +1709,9 @@ async function previewUsualBasket() {
         horizon_days: String(days),
       }),
     });
+    // The form, routine, or a newer preview may have changed during fetch.
+    // Never surface a token for inputs the user is no longer looking at.
+    if (revision !== state.usualBasketPreviewRevision) return;
     const heading = document.createElement("strong");
     heading.textContent = response.ready
       ? "Предварительный результат"
@@ -1733,8 +1748,54 @@ async function previewUsualBasket() {
       return `${itemName(choice.item_id)} — ${source}`;
     }).join("; ");
     panel.appendChild(evidence);
+    if (response.preview_id && response.plan?.status === "feasible") {
+      state.usualBasketPreviewId = response.preview_id;
+      const confirmButton = document.createElement("button");
+      confirmButton.type = "button";
+      confirmButton.id = "confirm-usual-basket";
+      confirmButton.className = "primary-button";
+      confirmButton.textContent = "Сохранить этот список покупок";
+      confirmButton.addEventListener("click", async () => {
+        if (!state.usualBasketPreviewId || confirmButton.disabled) return;
+        confirmButton.disabled = true;
+        confirmButton.textContent = "Сохраняем…";
+        try {
+          const saved = await request("/household/usual-basket/confirm", {
+            method: "POST",
+            body: JSON.stringify({
+              preview_id: state.usualBasketPreviewId,
+            }),
+          });
+          state.usualBasketPreviewId = null;
+          renderPlan(saved.plan);
+          await refreshOperationalState();
+          panel.replaceChildren();
+          const note = document.createElement("p");
+          note.textContent = "Список сохранён. Покупки пока не совершены: отмечайте и подтверждайте их отдельно.";
+          panel.appendChild(note);
+          showToast("Список покупок сохранён.");
+        } catch (error) {
+          confirmButton.disabled = false;
+          confirmButton.textContent = "Сохранить этот список покупок";
+          if (error instanceof ApiError && error.status === 409) {
+            state.usualBasketPreviewId = null;
+            confirmButton.disabled = true;
+            panel.textContent = "Данные изменились или предпросмотр устарел. Рассчитайте его снова.";
+          } else {
+            showToast(friendlyError(error), true);
+          }
+        }
+      });
+      panel.appendChild(confirmButton);
+      const hint = document.createElement("p");
+      hint.textContent = "Сохранение плана не записывает фактическую покупку или списание запасов.";
+      panel.appendChild(hint);
+    }
   } catch (error) {
-    panel.textContent = friendlyError(error);
+    if (revision === state.usualBasketPreviewRevision) {
+      state.usualBasketPreviewId = null;
+      panel.textContent = friendlyError(error);
+    }
   } finally {
     renderUsualBasket();
   }
@@ -1764,6 +1825,15 @@ for (const button of document.querySelectorAll("[data-view]")) {
 byId("start-home-setup").addEventListener("click", () => setView("home"));
 byId("save-usual-basket").addEventListener("click", saveUsualBasket);
 byId("preview-usual-basket").addEventListener("click", previewUsualBasket);
+// Invalidate displayed plans when the user changes planning assumptions.
+for (const input of ["plan-budget", "plan-currency", "plan-horizon", "custom-horizon-days"]) {
+  byId(input).addEventListener("input", invalidateUsualBasketPreview);
+  byId(input).addEventListener("change", invalidateUsualBasketPreview);
+}
+for (const chip of document.querySelectorAll("[data-days]")) {
+  chip.addEventListener("click", invalidateUsualBasketPreview);
+}
+byId("custom-horizon-toggle").addEventListener("click", invalidateUsualBasketPreview);
 byId("product-search").addEventListener("input", renderProductPicker);
 byId("discard-pending-stocktakes").addEventListener("click", () => {
   if (state.savingStocktakes) return;

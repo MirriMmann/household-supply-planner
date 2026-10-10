@@ -9,7 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from .usual_basket_persistence import UsualBasketRepository
 
 from household_supply.demand import (
     DemandCompilation,
@@ -143,11 +146,15 @@ def compose_usual_basket(
     if set(excluded) - selected_ids:
         raise UsualBasketError("exclusion references item outside routine/overrides")
 
-    for item_id in selected_ids:
+    active_ids = selected_ids - set(excluded)
+    for item_id in active_ids:
         if item_id not in items:
             raise UnknownCatalogItemError(f"usual basket item not in catalog: {item_id}")
-    # Validate explicit choices even if an accepted estimate would take precedence.
+    # Exclusions precede quantity interpretation, even for stale preferences.
+    # Validate active choices even if an accepted estimate would take precedence.
     for item_id, entry in routine.items():
+        if item_id in excluded:
+            continue
         if entry.fallback_quantity is not None and not any(
             sku.item.id == item_id
             and entry.fallback_quantity.compatible_with(sku.package_quantity)
@@ -155,6 +162,8 @@ def compose_usual_basket(
         ):
             raise UsualBasketError(f"fallback unit incompatible with catalog: {item_id}")
     for item_id, entry in overrides_by_id.items():
+        if item_id in excluded:
+            continue
         if not any(
             sku.item.id == item_id and entry.quantity.compatible_with(sku.package_quantity)
             for sku in catalog.skus
@@ -165,7 +174,7 @@ def compose_usual_basket(
     if len(set(e.item.id for e in estimates)) != len(estimates):
         raise UsualBasketError("duplicate admitted recurring estimate item_id")
     estimates_by_id = {estimate.item.id: estimate for estimate in estimates}
-    for item_id in selected_ids & estimates_by_id.keys():
+    for item_id in active_ids & estimates_by_id.keys():
         if estimates_by_id[item_id].item != items[item_id]:
             raise UsualBasketError(f"recurring Item identity conflicts with catalog: {item_id}")
 
@@ -240,7 +249,7 @@ class UsualBasketPreparationService:
 
     household: HouseholdLearningService
     catalog: CatalogSnapshot
-    basket_repository: object  # Duck-typed read-only .load(), not a household event store.
+    basket_repository: UsualBasketRepository
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def prepare(

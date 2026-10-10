@@ -286,3 +286,25 @@ def test_file_repository_rejects_duplicate_preference_identity(tmp_path):
     )
     with pytest.raises(Exception, match="corrupt"):
         FileUsualBasketRepository(path).load()
+
+def test_exclusion_wins_over_stale_incompatible_fallback():
+    basket = UsualBasket((
+        UsualBasketItem("milk", Quantity("1", "kg")),
+        UsualBasketItem("rice", Quantity("1", "kg")),
+    ))
+    candidate, _, _ = preparation(basket, exclusions=("milk",))
+    assert candidate.ready
+    assert [d.item_id for d in candidate.application_request.demands] == ["rice"]
+    assert [(c.item_id, c.basis) for c in candidate.choices] == [
+        ("milk", "excluded"), ("rice", "fallback")
+    ]
+
+
+def test_exclusion_of_removed_catalog_item_does_not_block_other_items():
+    basket = UsualBasket((
+        UsualBasketItem("removed", Quantity("1", "piece")),
+        UsualBasketItem("rice", Quantity("1", "kg")),
+    ))
+    candidate, _, _ = preparation(basket, exclusions=("removed",))
+    assert candidate.ready
+    assert candidate.application_request.demands[0].item_id == "rice"

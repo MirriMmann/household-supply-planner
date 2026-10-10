@@ -16,6 +16,7 @@ const state = {
   shoppingConfirming: false,
   view: "shopping",
   usualBasketDraft: new Map(),
+  usualBasketSkuChoices: new Map(),
   usualBasketAvailable: false,
   usualBasketDirty: false,
   usualBasketSaving: false,
@@ -1485,9 +1486,21 @@ async function refreshOperationalState() {
 
 // M12.5 experimental stand for explicit routine preferences. Preview never
 // creates a persisted plan, purchase or household inventory event.
-function usualFallbackFromRatio(itemId, ratio) {
-  const sku = primarySku(itemId);
-  if (!sku) throw new Error("Нет размера упаковки для выбранного товара.");
+function selectedRoutineSku(itemId, fallback) {
+  const choices = skusForItem(itemId);
+  const selected = state.usualBasketSkuChoices.get(itemId);
+  if (selected) return choices.find((sku) => sku.sku_id === selected) || null;
+  if (choices.length === 1) return choices[0];
+  // A previously stored fallback is an exact quantity, not proof of which
+  // retailer SKU the user intended. Do not silently choose among packages.
+  return null;
+}
+
+function usualFallbackFromRatio(itemId, skuId, ratio) {
+  const sku = skuById(skuId);
+  if (!sku || sku.item_id !== itemId) {
+    throw new Error("Сначала выберите конкретную упаковку.");
+  }
   const parts = ratio === "half" ? [1, 2] : ratio === "one" ? [1, 1] : [2, 1];
   return {
     amount: scaleDecimalText(sku.package_quantity.amount, parts[0], parts[1]),
@@ -1495,12 +1508,21 @@ function usualFallbackFromRatio(itemId, ratio) {
   };
 }
 
-function usualFallbackRatio(itemId, fallback) {
+function usualFallbackRatio(itemId, fallback, sku) {
   if (!fallback) return "";
+  if (!sku) return "custom";
   for (const ratio of ["half", "one", "two"]) {
-    if (sameQuantity(fallback, usualFallbackFromRatio(itemId, ratio))) return ratio;
+    if (sameQuantity(fallback, usualFallbackFromRatio(itemId, sku.sku_id, ratio))) {
+      return ratio;
+    }
   }
   return "custom";
+}
+
+function markUsualBasketDirty() {
+  state.usualBasketDirty = true;
+  byId("usual-basket-preview").classList.add("hidden");
+  renderUsualBasket();
 }
 
 function renderUsualBasket() {
@@ -1510,7 +1532,8 @@ function renderUsualBasket() {
   const list = byId("usual-basket-list");
   list.replaceChildren();
   for (const item of state.catalog.items) {
-    if (!primarySku(item.item_id)) continue;
+    const skuChoices = skusForItem(item.item_id);
+    if (!skuChoices.length) continue;
     const holder = document.createElement("div");
     holder.className = "usual-basket-item";
     const label = document.createElement("label");
@@ -1520,9 +1543,33 @@ function renderUsualBasket() {
     const title = document.createElement("span");
     title.textContent = `${itemEmoji(item.item_id)} ${item.name}`;
     label.append(enabled, title);
+    const fallback = state.usualBasketDraft.get(item.item_id) || null;
+    const reference = selectedRoutineSku(item.item_id, fallback);
+
+    // Show retailer package identity before interpreting "one package" when
+    // several canonical SKUs exist for the same household Item.
+    const packageSelect = document.createElement("select");
+    packageSelect.setAttribute("aria-label", `Упаковка для ${item.name}`);
+    appendOption(packageSelect, "", "Выберите упаковку");
+    for (const sku of skuChoices) {
+      appendOption(
+        packageSelect, sku.sku_id,
+        `${sku.name} · ${humanQuantity(sku.package_quantity)}`,
+      );
+    }
+    packageSelect.value = reference?.sku_id || "";
+    packageSelect.disabled = !enabled.checked || state.usualBasketSaving;
+    packageSelect.addEventListener("change", () => {
+      const next = packageSelect.value;
+      if (next) state.usualBasketSkuChoices.set(item.item_id, next);
+      else state.usualBasketSkuChoices.delete(item.item_id);
+      // Changing the reference package must not retain the old exact fallback.
+      state.usualBasketDraft.set(item.item_id, null);
+      markUsualBasketDirty();
+    });
+
     const select = document.createElement("select");
     select.setAttribute("aria-label", `Резервный объём для ${item.name}`);
-    const fallback = state.usualBasketDraft.get(item.item_id) || null;
     for (const [value, caption] of [
       ["", "По истории / уточнить"],
       ["half", "½ упаковки"],
@@ -1531,32 +1578,57 @@ function renderUsualBasket() {
     ]) {
       appendOption(select, value, caption);
     }
-    let ratio = usualFallbackRatio(item.item_id, fallback);
-    if (ratio === "custom") appendOption(select, "custom", `Указано: ${humanQuantity(fallback)}`);
+    const ratio = usualFallbackRatio(item.item_id, fallback, reference);
+    if (ratio === "custom") {
+      appendOption(select, "custom", `Указано: ${humanQuantity(fallback)}`);
+    }
     select.value = ratio;
-    select.disabled = !enabled.checked || state.usualBasketSaving;
+    select.disabled = !enabled.checked || state.usualBasketSaving || (!reference && !fallback);
     enabled.disabled = state.usualBasketSaving;
+
     enabled.addEventListener("change", () => {
       if (enabled.checked) state.usualBasketDraft.set(item.item_id, null);
-      else state.usualBasketDraft.delete(item.item_id);
-      state.usualBasketDirty = true;
-      byId("usual-basket-preview").classList.add("hidden");
-      renderUsualBasket();
+      else {
+        state.usualBasketDraft.delete(item.item_id);
+        state.usualBasketSkuChoices.delete(item.item_id);
+      }
+      markUsualBasketDirty();
     });
     select.addEventListener("change", () => {
       state.usualBasketDraft.set(
         item.item_id,
-        select.value === "" || select.value === "custom"
-          ? (select.value === "custom" ? fallback : null)
-          : usualFallbackFromRatio(item.item_id, select.value),
+        select.value === "" ? null
+          : select.value === "custom" ? fallback
+          : usualFallbackFromRatio(item.item_id, reference.sku_id, select.value),
       );
-      state.usualBasketDirty = true;
-      byId("usual-basket-preview").classList.add("hidden");
-      renderUsualBasket();
+      markUsualBasketDirty();
     });
-    holder.append(label, select);
+    holder.append(label, packageSelect, select);
     list.appendChild(holder);
   }
+
+  // An edited catalog can make saved preferences stale. Make each stale entry
+  // removable rather than trapping the user into a full destructive reset.
+  for (const itemId of state.usualBasketDraft.keys()) {
+    if (itemById(itemId) && skusForItem(itemId).length) continue;
+    const holder = document.createElement("div");
+    holder.className = "usual-basket-item";
+    const title = document.createElement("span");
+    title.textContent = `Недоступен в каталоге: ${itemId}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "text-button";
+    remove.textContent = "Удалить";
+    remove.disabled = state.usualBasketSaving;
+    remove.addEventListener("click", () => {
+      state.usualBasketDraft.delete(itemId);
+      state.usualBasketSkuChoices.delete(itemId);
+      markUsualBasketDirty();
+    });
+    holder.append(title, remove);
+    list.appendChild(holder);
+  }
+
   byId("usual-basket-status").textContent = state.usualBasketDirty
     ? "Есть несохранённые изменения. Сначала сохраните привычные товары."
     : `Сохранено привычных товаров: ${state.usualBasketDraft.size}`;
@@ -1572,6 +1644,7 @@ async function loadUsualBasket() {
     state.usualBasketDraft = new Map(
       (data.usual_basket?.items || []).map((entry) => [entry.item_id, entry.fallback_quantity]),
     );
+    state.usualBasketSkuChoices.clear();
     state.usualBasketDirty = false;
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;

@@ -102,3 +102,25 @@ def test_routine_panel_is_only_local_stand_and_preview_is_read_only():
     assert "response.preview_only" not in script or "preview" in html
     assert "loadUsualBasket()" in script
     assert "saveUsualBasket()" in script
+
+
+def test_reset_discloses_usual_basket_deletion():
+    from importlib.resources import files
+
+    reset_script = files("household_supply.web").joinpath("assets/reset.js").read_text(
+        encoding="utf-8"
+    )
+    assert "сохранённые привычные товары" in reset_script
+
+
+def test_stand_can_remove_stale_item_and_requires_explicit_sku():
+    from importlib.resources import files
+
+    script = files("household_supply.web").joinpath("assets/app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "Выберите упаковку" in script
+    assert "sku.sku_id" in script
+    assert "usualFallbackFromRatio(item.item_id, reference.sku_id" in script
+    assert "Недоступен в каталоге" in script
+    assert 'remove.textContent = "Удалить"' in script

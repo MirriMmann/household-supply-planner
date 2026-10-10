@@ -26,6 +26,7 @@ from household_supply.application import (
     LocalDataResetService,
     FileUsualBasketRepository,
     UsualBasketPreparationService,
+    UsualBasketPlanCommitService,
 )
 from household_supply.domain import (
     CatalogBinding,
@@ -139,7 +140,10 @@ def _build_web_app(
     )
     web_api = HouseholdWebJsonApi(
         closed_loop, catalog, reset_service,
-        usual_basket_api=UsualBasketWebApi(usual_basket, planner),
+        usual_basket_api=UsualBasketWebApi(
+            usual_basket, planner,
+            confirmation=UsualBasketPlanCommitService(usual_basket, lifecycle),
+        ),
     )
     return HouseholdLocalWebApp(web_api, allow_non_loopback_hosts=allow_remote_hosts)
 

@@ -100,6 +100,10 @@ def _require_decision_basis(value: Any) -> None:
     label = "plan request decision_basis"
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object")
+    kind = value.get("kind")
+    if kind not in {"household_replenishment", "usual_basket"}:
+        raise ValueError("unsupported plan decision_basis kind")
+    usual = kind == "usual_basket"
     _require_snapshot_schema(
         value,
         label=label,
@@ -110,12 +114,67 @@ def _require_decision_basis(value: Any) -> None:
             "explicit_needs",
             "recurring_estimates",
             "contributions",
-        },
+        }
+        | (
+            {"preview_id", "preferences", "choices", "household_event_ids"}
+            if usual
+            else set()
+        ),
     )
-    if value["kind"] != "household_replenishment":
-        raise ValueError(
-            "plan request decision_basis kind must be 'household_replenishment'"
+    if usual:
+        preview_id = _require_nonempty_string(
+            value["preview_id"], label=f"{label}.preview_id"
         )
+        if not preview_id.startswith("ub-"):
+            raise ValueError(f"{label}.preview_id must have ub- prefix")
+        preferences = value["preferences"]
+        choices = value["choices"]
+        event_ids = value["household_event_ids"]
+        if not isinstance(preferences, list) or not isinstance(choices, list):
+            raise ValueError(f"{label} preferences and choices must be arrays")
+        if not isinstance(event_ids, list) or any(
+            not isinstance(event_id, str) or not event_id
+            for event_id in event_ids
+        ) or len(event_ids) != len(set(event_ids)):
+            raise ValueError(f"{label}.household_event_ids must be unique strings")
+        preference_ids = []
+        for entry in preferences:
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"{label}.preferences must contain objects")
+            _require_snapshot_schema(
+                entry, label=f"{label}.preferences entry",
+                required={"item_id", "fallback_quantity"},
+            )
+            item_id = _require_nonempty_string(
+                entry["item_id"], label=f"{label}.preferences item_id"
+            )
+            preference_ids.append(item_id)
+            if entry["fallback_quantity"] is not None:
+                _require_quantity_snapshot(
+                    entry["fallback_quantity"],
+                    label=f"{label}.preferences fallback_quantity",
+                )
+        if preference_ids != sorted(set(preference_ids)):
+            raise ValueError(f"{label}.preferences must be canonical and unique")
+        choice_ids = []
+        for entry in choices:
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"{label}.choices must contain objects")
+            _require_snapshot_schema(
+                entry, label=f"{label}.choices entry",
+                required={"item_id", "basis"},
+            )
+            item_id = _require_nonempty_string(
+                entry["item_id"], label=f"{label}.choices item_id"
+            )
+            basis = _require_nonempty_string(
+                entry["basis"], label=f"{label}.choices basis"
+            )
+            if basis not in {"recurring", "fallback", "override", "excluded"}:
+                raise ValueError(f"{label}.choices contains unsupported basis")
+            choice_ids.append(item_id)
+        if choice_ids != sorted(set(choice_ids)):
+            raise ValueError(f"{label}.choices must be canonical and unique")
 
     as_of = _require_nonempty_string(value["as_of"], label=f"{label}.as_of")
     try:
@@ -246,7 +305,9 @@ def _require_decision_basis(value: Any) -> None:
         )
         if source_id == "household:recurring":
             recurring_contribution_ids.add(item_id)
-        elif source_id == "request:explicit":
+        elif source_id == "request:explicit" or (
+            usual and source_id in {"routine:fallback", "request:override"}
+        ):
             explicit_contribution_ids.add(item_id)
 
     if recurring_ids != recurring_contribution_ids:
@@ -257,6 +318,25 @@ def _require_decision_basis(value: Any) -> None:
         raise ValueError(
             f"{label} explicit needs do not match explicit contributions"
         )
+
+    if usual:
+        contribution_items = {
+            entry["item_id"]: entry["source_id"]
+            for entry in contributions
+        }
+        if len(contribution_items) != len(contributions):
+            raise ValueError(f"{label} routine contributions must be unique per Item")
+        active_choices = {}
+        for entry in choices:
+            if entry["basis"] == "excluded":
+                continue
+            active_choices[entry["item_id"]] = {
+                "recurring": "household:recurring",
+                "fallback": "routine:fallback",
+                "override": "request:override",
+            }[entry["basis"]]
+        if active_choices != contribution_items:
+            raise ValueError(f"{label} routine choices do not match contributions")
 
 
 

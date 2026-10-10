@@ -16,6 +16,10 @@ from household_supply.application import (
     UsualBasketError,
     UsualBasketItem,
     UsualBasketPreparationService,
+    UsualBasketPlanCommitService,
+    UsualBasketStalePreview,
+    PlanRepositoryError,
+    serialize_plan_record,
     UsualBasketRepositoryError,
     UnknownCatalogItemError,
     serialize_plan_result,
@@ -54,12 +58,14 @@ def _serialize_basket(basket: UsualBasket) -> dict[str, Any]:
 class UsualBasketWebApi:
     preparation: UsualBasketPreparationService
     planner: ApplicationPlanner
+    confirmation: UsualBasketPlanCommitService | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         path_only = urlsplit(path).path
         return method.strip().upper() == "POST" and path_only in {
             "/household/usual-basket",
             "/household/usual-basket/preview",
+            "/household/usual-basket/confirm",
         }
 
     def handle(self, method: str, path: str, payload: Mapping[str, Any] | None = None) -> JsonApiResponse:
@@ -107,6 +113,21 @@ class UsualBasketWebApi:
                         raise UsualBasketError(f"incompatible fallback quantity: {entry.item_id}")
                 self.preparation.basket_repository.save(basket)
                 return JsonApiResponse(200, {"usual_basket": _serialize_basket(basket)})
+            if target.path == "/household/usual-basket/confirm":
+                if method != "POST":
+                    return JsonApiResponse(405, {"error": "method_not_allowed"})
+                if self.confirmation is None:
+                    return JsonApiResponse(404, {"error": "not_found"})
+                obj = _require_mapping(payload, label="routine confirmation")
+                _require_keys(obj, label="routine confirmation", required={"preview_id"})
+                preview_id = _require_string(
+                    obj["preview_id"], label="routine confirmation.preview_id"
+                )
+                record = self.confirmation.confirm(preview_id)
+                return JsonApiResponse(
+                    201,
+                    {"plan": serialize_plan_record(record), "confirmed": True},
+                )
             if target.path == "/household/usual-basket/preview":
                 if method != "POST":
                     return JsonApiResponse(405, {"error": "method_not_allowed"})
@@ -136,12 +157,15 @@ class UsualBasketWebApi:
                     _require_string(item_id, label=f"exclusions[{index}]")
                     for index, item_id in enumerate(raw_exclusions)
                 )
-                proposal = self.preparation.prepare(
+                if self.confirmation is None:
+                    return JsonApiResponse(404, {"error": "not_found"})
+                staged = self.confirmation.preview(
                     budget=_parse_money(obj["budget"], label="budget"),
                     horizon_days=horizon,
                     overrides=tuple(overrides),
                     exclusions=exclusions,
                 )
+                proposal = staged.snapshot.proposal
                 response = {
                     "ready": proposal.ready,
                     "needs_clarification": list(proposal.needs_clarification),
@@ -151,16 +175,23 @@ class UsualBasketWebApi:
                     ],
                     "plan": None,
                     "preview_only": True,
+                    "preview_id": staged.preview_id,
                 }
                 if proposal.ready:
                     # Existing deterministic planner, never creates a PlanRecord or PurchaseEvent.
                     response["plan"] = serialize_plan_result(
-                        self.planner.plan(proposal.application_request)
+                        staged.planning_result
                     )
                 return JsonApiResponse(200, response)
             return JsonApiResponse(404, {"error": "not_found"})
+        except UsualBasketStalePreview as exc:
+            return JsonApiResponse(
+                409, {"error": "stale_preview", "detail": str(exc)}
+            )
         except (JsonPayloadError, UsualBasketError, UnknownCatalogItemError, ValueError, TypeError) as exc:
             return JsonApiResponse(422, {"error": "invalid_request", "detail": str(exc)})
+        except PlanRepositoryError as exc:
+            return JsonApiResponse(500, {"error": "plan_storage_failed", "detail": str(exc)})
         except UsualBasketRepositoryError as exc:
             return JsonApiResponse(500, {"error": "routine_storage_failed", "detail": str(exc)})
         except ApplicationMarketError as exc:

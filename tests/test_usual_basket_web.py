@@ -87,3 +87,18 @@ def test_preview_rejects_unexpected_inputs_and_keeps_profile(tmp_path):
     ]:
         assert app.api.handle("POST", "/household/usual-basket/preview", payload).status == 422
     assert len(app.api.handle("GET", "/household/usual-basket").body["usual_basket"]["items"]) == 1
+
+
+def test_routine_panel_is_only_local_stand_and_preview_is_read_only():
+    from importlib.resources import files
+
+    html = files("household_supply.web").joinpath("assets/index.html").read_text(encoding="utf-8")
+    script = files("household_supply.web").joinpath("assets/app.js").read_text(encoding="utf-8")
+    assert 'id="usual-basket-panel"' in html
+    assert 'id="usual-basket-list"' in html
+    assert 'id="preview-usual-basket"' in html
+    assert "state.usualBasketDraft" in script
+    assert 'request("/household/usual-basket/preview"' in script
+    assert "response.preview_only" not in script or "preview" in html
+    assert "loadUsualBasket()" in script
+    assert "saveUsualBasket()" in script

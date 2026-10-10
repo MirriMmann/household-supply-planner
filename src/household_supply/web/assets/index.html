@@ -48,6 +48,19 @@
         <button class="secondary-button" id="start-home-setup" type="button">Отметить запасы</button>
       </div>
 
+      <details class="secondary-operation usual-basket-panel hidden" id="usual-basket-panel">
+        <summary>Моя обычная закупка</summary>
+        <p>Выберите привычные товары. Если истории расхода пока нет, можно явно указать резервное количество на эту закупку.</p>
+        <div id="usual-basket-list" class="usual-basket-list"></div>
+        <p id="usual-basket-status" class="usual-basket-status" aria-live="polite"></p>
+        <div class="usual-basket-actions">
+          <button type="button" class="secondary-button" id="save-usual-basket">Сохранить привычные товары</button>
+          <button type="button" class="primary-button" id="preview-usual-basket">Предварительный план</button>
+        </div>
+        <div id="usual-basket-preview" class="usual-basket-preview hidden" aria-live="polite"></div>
+        <p class="human-note">Предпросмотр не создаёт покупки и не меняет остатки. Бюджет и период берутся из формы ниже.</p>
+      </details>
+
       <section class="primary-card planner-card">
         <div class="section-heading">
           <span class="section-kicker">НА ЭТУ ПОКУПКУ</span>

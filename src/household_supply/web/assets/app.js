@@ -15,6 +15,10 @@ const state = {
   shoppingSession: null,
   shoppingConfirming: false,
   view: "shopping",
+  usualBasketDraft: new Map(),
+  usualBasketAvailable: false,
+  usualBasketDirty: false,
+  usualBasketSaving: false,
 };
 
 class ApiError extends Error {
@@ -1479,6 +1483,190 @@ async function refreshOperationalState() {
   renderActivity();
 }
 
+// M12.5 experimental stand for explicit routine preferences. Preview never
+// creates a persisted plan, purchase or household inventory event.
+function usualFallbackFromRatio(itemId, ratio) {
+  const sku = primarySku(itemId);
+  if (!sku) throw new Error("Нет размера упаковки для выбранного товара.");
+  const parts = ratio === "half" ? [1, 2] : ratio === "one" ? [1, 1] : [2, 1];
+  return {
+    amount: scaleDecimalText(sku.package_quantity.amount, parts[0], parts[1]),
+    unit: sku.package_quantity.unit,
+  };
+}
+
+function usualFallbackRatio(itemId, fallback) {
+  if (!fallback) return "";
+  for (const ratio of ["half", "one", "two"]) {
+    if (sameQuantity(fallback, usualFallbackFromRatio(itemId, ratio))) return ratio;
+  }
+  return "custom";
+}
+
+function renderUsualBasket() {
+  const panel = byId("usual-basket-panel");
+  panel.classList.toggle("hidden", !state.usualBasketAvailable);
+  if (!state.usualBasketAvailable) return;
+  const list = byId("usual-basket-list");
+  list.replaceChildren();
+  for (const item of state.catalog.items) {
+    if (!primarySku(item.item_id)) continue;
+    const holder = document.createElement("div");
+    holder.className = "usual-basket-item";
+    const label = document.createElement("label");
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.checked = state.usualBasketDraft.has(item.item_id);
+    const title = document.createElement("span");
+    title.textContent = `${itemEmoji(item.item_id)} ${item.name}`;
+    label.append(enabled, title);
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", `Резервный объём для ${item.name}`);
+    const fallback = state.usualBasketDraft.get(item.item_id) || null;
+    for (const [value, caption] of [
+      ["", "По истории / уточнить"],
+      ["half", "½ упаковки"],
+      ["one", "1 упаковка"],
+      ["two", "2 упаковки"],
+    ]) {
+      appendOption(select, value, caption);
+    }
+    let ratio = usualFallbackRatio(item.item_id, fallback);
+    if (ratio === "custom") appendOption(select, "custom", `Указано: ${humanQuantity(fallback)}`);
+    select.value = ratio;
+    select.disabled = !enabled.checked || state.usualBasketSaving;
+    enabled.disabled = state.usualBasketSaving;
+    enabled.addEventListener("change", () => {
+      if (enabled.checked) state.usualBasketDraft.set(item.item_id, null);
+      else state.usualBasketDraft.delete(item.item_id);
+      state.usualBasketDirty = true;
+      byId("usual-basket-preview").classList.add("hidden");
+      renderUsualBasket();
+    });
+    select.addEventListener("change", () => {
+      state.usualBasketDraft.set(
+        item.item_id,
+        select.value === "" || select.value === "custom"
+          ? (select.value === "custom" ? fallback : null)
+          : usualFallbackFromRatio(item.item_id, select.value),
+      );
+      state.usualBasketDirty = true;
+      byId("usual-basket-preview").classList.add("hidden");
+      renderUsualBasket();
+    });
+    holder.append(label, select);
+    list.appendChild(holder);
+  }
+  byId("usual-basket-status").textContent = state.usualBasketDirty
+    ? "Есть несохранённые изменения. Сначала сохраните привычные товары."
+    : `Сохранено привычных товаров: ${state.usualBasketDraft.size}`;
+  byId("save-usual-basket").disabled = state.usualBasketSaving || !state.usualBasketDirty;
+  byId("preview-usual-basket").disabled =
+    state.usualBasketSaving || state.usualBasketDirty || state.usualBasketDraft.size === 0;
+}
+
+async function loadUsualBasket() {
+  try {
+    const data = await request("/household/usual-basket");
+    state.usualBasketAvailable = true;
+    state.usualBasketDraft = new Map(
+      (data.usual_basket?.items || []).map((entry) => [entry.item_id, entry.fallback_quantity]),
+    );
+    state.usualBasketDirty = false;
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    state.usualBasketAvailable = false;
+  }
+  renderUsualBasket();
+}
+
+async function saveUsualBasket() {
+  if (state.usualBasketSaving || !state.usualBasketDirty) return;
+  state.usualBasketSaving = true;
+  renderUsualBasket();
+  try {
+    const items = [...state.usualBasketDraft].map(([item_id, fallback_quantity]) => ({
+      item_id, fallback_quantity,
+    }));
+    const result = await request("/household/usual-basket", {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    });
+    state.usualBasketDraft = new Map(
+      result.usual_basket.items.map((entry) => [entry.item_id, entry.fallback_quantity]),
+    );
+    state.usualBasketDirty = false;
+    showToast("Привычные товары сохранены.");
+  } catch (error) {
+    showToast(friendlyError(error), true);
+  } finally {
+    state.usualBasketSaving = false;
+    renderUsualBasket();
+  }
+}
+
+async function previewUsualBasket() {
+  if (state.usualBasketDirty || !state.usualBasketDraft.size) return;
+  const button = byId("preview-usual-basket");
+  button.disabled = true;
+  const panel = byId("usual-basket-preview");
+  panel.classList.remove("hidden");
+  panel.replaceChildren();
+  try {
+    const days = parseHorizonDays(byId("plan-horizon").value);
+    if (days === null) throw new Error("Выберите положительный период.");
+    const amount = normalizeNumberInput(byId("plan-budget").value);
+    if (!amount) throw new Error("Укажите бюджет в форме ниже.");
+    const response = await request("/household/usual-basket/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        budget: { amount, currency: byId("plan-currency").value },
+        horizon_days: String(days),
+      }),
+    });
+    const heading = document.createElement("strong");
+    heading.textContent = response.ready
+      ? "Предварительный результат"
+      : "Нужно уточнить количество";
+    panel.appendChild(heading);
+    if (response.needs_clarification?.length) {
+      const note = document.createElement("p");
+      note.textContent = "Нет подтверждённой нормы или явно заданного количества для: "
+        + response.needs_clarification.map(itemName).join(", ")
+        + ". Выберите резервное количество и сохраните корзину.";
+      panel.appendChild(note);
+    }
+    if (response.plan) {
+      const note = document.createElement("p");
+      note.textContent = response.plan.status === "feasible"
+        ? `Ожидаемые расходы: ${moneyText(response.plan.total_cost)}`
+        : "При текущем бюджете и рыночных данных план не найден.";
+      panel.appendChild(note);
+      if ((response.plan.purchases || []).length) {
+        const list = document.createElement("ul");
+        for (const purchase of response.plan.purchases) {
+          const item = document.createElement("li");
+          item.textContent = `${itemName(purchase.item_id)} · ${packageText(purchase.packs)} · ${moneyText(purchase.cost)}`;
+          list.appendChild(item);
+        }
+        panel.appendChild(list);
+      }
+    }
+    const evidence = document.createElement("p");
+    evidence.textContent = (response.choices || []).map((choice) => {
+      const source = choice.basis === "recurring" ? "по истории расхода"
+        : choice.basis === "fallback" ? "по указанному количеству"
+        : choice.basis === "override" ? "по разовому запросу" : "требует уточнения";
+      return `${itemName(choice.item_id)} — ${source}`;
+    }).join("; ");
+    panel.appendChild(evidence);
+  } catch (error) {
+    panel.textContent = friendlyError(error);
+  } finally {
+    renderUsualBasket();
+  }
+}
+
 async function refreshAll() {
   try {
     setConnection(false, "Подключаемся…");
@@ -1487,6 +1675,7 @@ async function refreshAll() {
     refillSkuSelect(byId("manual-purchase-sku"));
     renderProductPicker();
     renderMustHaves();
+    await loadUsualBasket();
     await refreshOperationalState();
     setConnection(true, "Работает");
   } catch (error) {
@@ -1500,6 +1689,8 @@ for (const button of document.querySelectorAll("[data-view]")) {
 }
 
 byId("start-home-setup").addEventListener("click", () => setView("home"));
+byId("save-usual-basket").addEventListener("click", saveUsualBasket);
+byId("preview-usual-basket").addEventListener("click", previewUsualBasket);
 byId("product-search").addEventListener("input", renderProductPicker);
 byId("discard-pending-stocktakes").addEventListener("click", () => {
   if (state.savingStocktakes) return;

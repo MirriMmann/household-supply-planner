@@ -344,7 +344,11 @@ def routine_stand_preview(browser) -> None:
         milk = next(x for x in rows if "Молоко" in x.text)
         Select(milk.find_element(By.TAG_NAME, "select")).select_by_value("one")
         assert not browser.find_element(By.ID, "save-usual-basket").get_attribute("disabled")
-        browser.find_element(By.ID, "save-usual-basket").click()
+        save = browser.find_element(By.ID, "save-usual-basket")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", save
+        )
+        save.click()
         wait.until(lambda d: "Сохранено привычных товаров: 1" in d.find_element(
             By.ID, "usual-basket-status"
         ).text)
@@ -354,7 +358,11 @@ def routine_stand_preview(browser) -> None:
         budget = browser.find_element(By.ID, "plan-budget")
         budget.clear()
         budget.send_keys("500")
-        browser.find_element(By.ID, "preview-usual-basket").click()
+        preview_button = browser.find_element(By.ID, "preview-usual-basket")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", preview_button
+        )
+        preview_button.click()
         wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
             By.ID, "usual-basket-preview"
         ).text)

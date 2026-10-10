@@ -146,3 +146,14 @@ def test_stand_has_explicit_repeat_action_and_no_stale_sku_replay():
     assert "await previewUsualBasket()" in js
     assert "applyPreviousRoutineInputs(current.repeat_settings)" in js
     assert "revision !== state.usualBasketPreviewRevision" in js
+
+
+def test_repeat_does_not_treat_fixed_currency_input_as_select():
+    from importlib.resources import files
+
+    assets = files("household_supply.web").joinpath("assets")
+    html = assets.joinpath("index.html").read_text(encoding="utf-8")
+    js = assets.joinpath("app.js").read_text(encoding="utf-8")
+    assert 'id="plan-currency" type="hidden" value="KGS"' in html
+    assert "settings.budget.currency !== currency.value" in js
+    assert "currency.options" not in js

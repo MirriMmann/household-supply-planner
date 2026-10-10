@@ -1690,13 +1690,12 @@ function applyPreviousRoutineInputs(settings) {
   const days = parseHorizonDays(settings.horizon_days);
   const amount = normalizeNumberInput(String(settings.budget.amount));
   const currency = byId("plan-currency");
-  if (days === null || !amount || ![...currency.options].some(
-    (option) => option.value === settings.budget.currency
-  )) {
+  // The current stand intentionally fixes currency to KGS in a hidden input.
+  // Refuse a historic currency the stand cannot display or plan in.
+  if (days === null || !amount || settings.budget.currency !== currency.value) {
     throw new Error("Прошлые настройки больше не поддерживаются этой формой.");
   }
   byId("plan-budget").value = amount;
-  currency.value = settings.budget.currency;
   const preset = [...document.querySelectorAll("[data-days]")].find(
     (button) => Number(button.dataset.days) === days
   );

@@ -348,8 +348,14 @@ def routine_stand_preview(browser) -> None:
         assert not browser.find_element(By.ID, "save-usual-basket").get_attribute("disabled")
         save = browser.find_element(By.ID, "save-usual-basket")
         browser.execute_script(
-            "arguments[0].scrollIntoView({block: 'center'});", save
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});", save
         )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", save
+        ))
         save.click()
         wait.until(lambda d: "Сохранено привычных товаров: 1" in d.find_element(
             By.ID, "usual-basket-status"
@@ -362,8 +368,14 @@ def routine_stand_preview(browser) -> None:
         budget.send_keys("500")
         preview_button = browser.find_element(By.ID, "preview-usual-basket")
         browser.execute_script(
-            "arguments[0].scrollIntoView({block: 'center'});", preview_button
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});", preview_button
         )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", preview_button
+        ))
         preview_button.click()
         wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
             By.ID, "usual-basket-preview"

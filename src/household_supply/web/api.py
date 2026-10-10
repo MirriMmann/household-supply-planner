@@ -12,6 +12,8 @@ from household_supply.application import (
 )
 from household_supply.domain import CatalogSnapshot
 
+from .usual_basket_api import UsualBasketWebApi
+
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
 
@@ -136,9 +138,15 @@ class HouseholdWebJsonApi:
     api: JsonApiHandler
     catalog: CatalogSnapshot
     reset_service: LocalDataResetService | None = None
+    usual_basket_api: UsualBasketWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.usual_basket_api is not None
+            and self.usual_basket_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.reset_service is not None
             and method.strip().upper() == "POST"
@@ -158,6 +166,11 @@ class HouseholdWebJsonApi:
         target = urlsplit(path)
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
+
+        if target.path in {"/household/usual-basket", "/household/usual-basket/preview"}:
+            if self.usual_basket_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.usual_basket_api.handle(method, path, payload)
 
         if target.path == "/catalog":
             if target.query:

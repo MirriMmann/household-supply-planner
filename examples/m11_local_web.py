@@ -24,6 +24,8 @@ from household_supply.application import (
     PlanLifecycleService,
     HouseholdReplenishmentService,
     LocalDataResetService,
+    FileUsualBasketRepository,
+    UsualBasketPreparationService,
 )
 from household_supply.domain import (
     CatalogBinding,
@@ -42,6 +44,7 @@ from household_supply.web import (
     HouseholdLocalWebApp,
     HouseholdWebJsonApi,
     serve_local_web,
+    UsualBasketWebApi,
 )
 
 
@@ -127,8 +130,17 @@ def _build_web_app(
         clock=utc_now,
     )
     closed_loop = HouseholdClosedLoopJsonApi(replenishment)
-    reset_service = LocalDataResetService(household, plan_repository)
-    web_api = HouseholdWebJsonApi(closed_loop, catalog, reset_service)
+    usual_basket_repo = FileUsualBasketRepository(data_dir / "usual-basket.json")
+    usual_basket = UsualBasketPreparationService(
+        household, catalog, usual_basket_repo, clock=utc_now,
+    )
+    reset_service = LocalDataResetService(
+        household, plan_repository, usual_basket_repository=usual_basket_repo,
+    )
+    web_api = HouseholdWebJsonApi(
+        closed_loop, catalog, reset_service,
+        usual_basket_api=UsualBasketWebApi(usual_basket, planner),
+    )
     return HouseholdLocalWebApp(web_api, allow_non_loopback_hosts=allow_remote_hosts)
 
 

@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 
 
@@ -321,11 +322,69 @@ def onboarding_wizard(browser) -> None:
         print("PASS onboarding wizard: 3 steps, 2 facts, missing item, mobile width", flush=True)
 
 
+def routine_stand_preview(browser) -> None:
+    """A real browser can save a routine and preview without making household facts."""
+    with demo() as base:
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+        panel = browser.find_element(By.ID, "usual-basket-panel")
+        assert panel.is_displayed(), "Demo must expose the routine stand"
+        panel.find_element(By.CSS_SELECTOR, "summary").click()
+        wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, "#usual-basket-list .usual-basket-item"))
+        screenshot(browser, "11-usual-basket-empty")
+        rows = browser.find_elements(By.CSS_SELECTOR, "#usual-basket-list .usual-basket-item")
+        milk = next(x for x in rows if "Молоко" in x.text)
+        milk.find_element(By.CSS_SELECTOR, 'input[type="checkbox"]').click()
+
+        rows = browser.find_elements(By.CSS_SELECTOR, "#usual-basket-list .usual-basket-item")
+        milk = next(x for x in rows if "Молоко" in x.text)
+        Select(milk.find_element(By.TAG_NAME, "select")).select_by_value("one")
+        assert not browser.find_element(By.ID, "save-usual-basket").get_attribute("disabled")
+        browser.find_element(By.ID, "save-usual-basket").click()
+        wait.until(lambda d: "Сохранено привычных товаров: 1" in d.find_element(
+            By.ID, "usual-basket-status"
+        ).text)
+        assert api(base, "/household/usual-basket")["usual_basket"]["items"][0]["item_id"] == "milk"
+        assert api(base, "/household/history")["event_count"] == 0
+
+        budget = browser.find_element(By.ID, "plan-budget")
+        budget.clear()
+        budget.send_keys("500")
+        browser.find_element(By.ID, "preview-usual-basket").click()
+        wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
+            By.ID, "usual-basket-preview"
+        ).text)
+        assert "по указанному количеству" in browser.find_element(
+            By.ID, "usual-basket-preview"
+        ).text
+        viewport_check(browser, "routine preview")
+        screenshot(browser, "12-usual-basket-preview")
+        assert api(base, "/household/history")["event_count"] == 0
+        assert len(api(base, "/plans?limit=12")["plans"]) == 0
+
+        browser.refresh()
+        wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+        browser.find_element(By.CSS_SELECTOR, "#usual-basket-panel summary").click()
+        wait.until(lambda d: "Сохранено привычных товаров: 1" in d.find_element(
+            By.ID, "usual-basket-status"
+        ).text)
+        screenshot(browser, "13-usual-basket-reloaded")
+        print("PASS usual basket: select, save, preview, reload, no silent writes", flush=True)
+
+
 def main() -> None:
     with mobile_browser() as browser:
         onboarding_wizard(browser)
         first_batch(browser)
         reminder_reentry(browser)
+        routine_stand_preview(browser)
     print("MOBILE_UX_SMOKE_OK", flush=True)
 
 

@@ -639,3 +639,5 @@ body.onboarding-open { overflow: hidden; }
 .usual-basket-preview ul { margin: 6px 0 0; padding-left: 20px; }
 
 #confirm-usual-basket { width: 100%; min-height: 44px; margin-block: 12px 6px; }
+
+#repeat-usual-basket { min-height: 44px; scroll-margin-block: 120px; }

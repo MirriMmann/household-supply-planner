@@ -488,6 +488,13 @@ def routine_stand_preview(browser) -> None:
         budget = browser.find_element(By.ID, "plan-budget")
         budget.clear()
         budget.send_keys("900")
+        # Stored Decimal horizons must be accepted exactly, never rounded.
+        assert browser.execute_script(
+            "return [parseConfirmedHorizonDays('7.0'), "
+            "parseConfirmedHorizonDays('1E+1'), "
+            "parseConfirmedHorizonDays('7.5')];"
+        ) == [7, 10, None]
+
         repeat = browser.find_element(By.ID, "repeat-usual-basket")
         wait.until(lambda d: repeat.is_displayed() and repeat.is_enabled())
         assert "500 KGS" in repeat.text

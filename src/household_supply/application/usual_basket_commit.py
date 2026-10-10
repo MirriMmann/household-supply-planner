@@ -211,6 +211,24 @@ class UsualBasketPlanCommitService:
             self.pending.pop(preview_id, None)
             return record
 
+    def last_confirmed_settings(self) -> dict | None:
+        """Return only explicit inputs from a previously confirmed routine plan.
+
+        Never reuse its demands, inventory, estimates, SKUs or market evidence.
+        If no routine plan exists in the recent 100 records, offer no shortcut.
+        """
+        for record in self.plans.list_recent(100):
+            stored = record.request.to_mapping()
+            basis = stored.get("decision_basis")
+            if not isinstance(basis, dict) or basis.get("kind") != "usual_basket":
+                continue
+            return {
+                "source_plan_id": record.plan_id.value,
+                "budget": stored["budget"],
+                "horizon_days": basis["horizon_days"],
+            }
+        return None
+
     def discard_previews(self) -> None:
         with self.lock:
             self.pending.clear()

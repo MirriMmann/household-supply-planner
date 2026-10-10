@@ -1,3 +1,18 @@
+from .usual_basket import (
+    UsualBasket,
+    UsualBasketChoice,
+    UsualBasketError,
+    UsualBasketItem,
+    UsualBasketPreparationService,
+    UsualBasketProposal,
+    compose_usual_basket,
+)
+from .usual_basket_persistence import (
+    FileUsualBasketRepository,
+    InMemoryUsualBasketRepository,
+    UsualBasketRepository,
+    UsualBasketRepositoryError,
+)
 from .household_operations import (
     HouseholdOperationConflictError,
     HouseholdOperationError,
@@ -78,6 +93,17 @@ from .reset import (
 )
 
 __all__ = [
+    "UsualBasket",
+    "UsualBasketChoice",
+    "UsualBasketError",
+    "UsualBasketItem",
+    "UsualBasketPreparationService",
+    "UsualBasketProposal",
+    "compose_usual_basket",
+    "FileUsualBasketRepository",
+    "InMemoryUsualBasketRepository",
+    "UsualBasketRepository",
+    "UsualBasketRepositoryError",
     "LocalDataResetError",
     "LocalDataResetResult",
     "LocalDataResetService",

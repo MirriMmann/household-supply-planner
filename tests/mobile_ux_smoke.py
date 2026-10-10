@@ -472,7 +472,58 @@ def routine_stand_preview(browser) -> None:
         screenshot(browser, "13-usual-basket-reloaded")
         assert len(api(base, "/plans?limit=12")["plans"]) == 1
         assert api(base, "/household/history")["event_count"] == 0
-        print("PASS usual basket: save, preview, explicit confirmation, reload, no silent purchases", flush=True)
+
+        # The next shop should reuse budget/horizon, but NOT replay the old stock.
+        settings = api(base, "/household/usual-basket/last-settings")["repeat_settings"]
+        assert settings["budget"] == {"amount": "500", "currency": "KGS"}
+        assert settings["horizon_days"] == "7"
+        assert settings["source_plan_id"] == api(base, "/plans?limit=12")["plans"][0]["plan_id"]
+        corrected = api(base, "/household/stocktakes", {
+            "event_id": "repeat-updated-milk-stock",
+            "item_id": "milk",
+            "quantity": {"amount": "2", "unit": "l"},
+            "reason": "updated before second weekly shop",
+        })
+        assert corrected["event"]["event_id"] == "repeat-updated-milk-stock"
+        budget = browser.find_element(By.ID, "plan-budget")
+        budget.clear()
+        budget.send_keys("900")
+        # Stored Decimal horizons must be accepted exactly, never rounded.
+        assert browser.execute_script(
+            "return [parseConfirmedHorizonDays('7.0'), "
+            "parseConfirmedHorizonDays('1E+1'), "
+            "parseConfirmedHorizonDays('7.5')];"
+        ) == [7, 10, None]
+
+        repeat = browser.find_element(By.ID, "repeat-usual-basket")
+        wait.until(lambda d: repeat.is_displayed() and repeat.is_enabled())
+        assert "500 KGS" in repeat.text
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            repeat,
+        )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y>=0 && y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", repeat
+        ))
+        repeat.click()
+        wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
+            By.ID, "usual-basket-preview"
+        ).text)
+        assert browser.find_element(By.ID, "plan-budget").get_attribute("value") == "500"
+        assert browser.find_element(By.ID, "plan-horizon").get_attribute("value") == "7"
+        assert browser.find_element(By.ID, "confirm-usual-basket").is_displayed()
+        assert len(api(base, "/plans?limit=12")["plans"]) == 1
+        assert api(base, "/household/history")["event_count"] == 1
+        viewport_check(browser, "repeat usual basket")
+        screenshot(browser, "15-usual-basket-repeat-with-updated-stock")
+        print(
+            "PASS usual basket: save, confirm, reload, one-tap repeat, "
+            "fresh stock without silent writes",
+            flush=True,
+        )
 
 
 def main() -> None:

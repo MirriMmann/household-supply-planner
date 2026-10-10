@@ -22,6 +22,8 @@ const state = {
   usualBasketSaving: false,
   usualBasketPreviewId: null,
   usualBasketPreviewRevision: 0,
+  usualBasketRepeatSettings: null,
+  usualBasketRepeating: false,
 };
 
 class ApiError extends Error {
@@ -1645,6 +1647,16 @@ function renderUsualBasket() {
   byId("save-usual-basket").disabled = state.usualBasketSaving || !state.usualBasketDirty;
   byId("preview-usual-basket").disabled =
     state.usualBasketSaving || state.usualBasketDirty || state.usualBasketDraft.size === 0;
+  const repeat = byId("repeat-usual-basket");
+  repeat.classList.toggle("hidden", !state.usualBasketRepeatSettings);
+  repeat.disabled =
+    state.usualBasketSaving || state.usualBasketRepeating
+    || state.usualBasketDirty || state.usualBasketDraft.size === 0;
+  if (state.usualBasketRepeatSettings) {
+    const settings = state.usualBasketRepeatSettings;
+    repeat.textContent =
+      `Повторить: ${settings.budget.amount} ${settings.budget.currency}, ${settings.horizon_days} дн.`;
+  }
 }
 
 async function loadUsualBasket() {
@@ -1657,11 +1669,83 @@ async function loadUsualBasket() {
     state.usualBasketSkuChoices.clear();
     state.usualBasketDirty = false;
     invalidateUsualBasketPreview();
+    await loadRepeatSettings();
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     state.usualBasketAvailable = false;
   }
   renderUsualBasket();
+}
+
+
+async function loadRepeatSettings() {
+  const result = await request("/household/usual-basket/last-settings");
+  state.usualBasketRepeatSettings = result.repeat_settings;
+  renderUsualBasket();
+}
+
+function parseConfirmedHorizonDays(value) {
+  // The domain accepts Decimal("7.0") and Decimal("1E+1"), while the stand
+  // selects integral days. Normalize exactly, not via floating point rounding.
+  const raw = String(value).trim();
+  const parsed = /^\+?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?$/.exec(raw);
+  if (!parsed || raw.length > 64) return null;
+  const exponentText = raw.match(/[eE]([+-]?\d+)$/)?.[1] || "0";
+  const exponent = Number(exponentText);
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 30) return null;
+  return parseHorizonDays(decimalText(raw));
+}
+
+function applyPreviousRoutineInputs(settings) {
+  // These are solely user-approved planning inputs. Neither previous SKUs nor
+  // quantities, prices, household state or market observations are replayed.
+  const days = parseConfirmedHorizonDays(settings.horizon_days);
+  const amount = normalizeNumberInput(String(settings.budget.amount));
+  const currency = byId("plan-currency");
+  // The current stand intentionally fixes currency to KGS in a hidden input.
+  // Refuse a historic currency the stand cannot display or plan in.
+  if (days === null || !amount || settings.budget.currency !== currency.value) {
+    throw new Error("Прошлые настройки больше не поддерживаются этой формой.");
+  }
+  byId("plan-budget").value = amount;
+  const preset = [...document.querySelectorAll("[data-days]")].find(
+    (button) => Number(button.dataset.days) === days
+  );
+  if (preset) {
+    setHorizonPreset(preset);
+  } else {
+    byId("custom-horizon-days").value = String(days);
+    updateCustomHorizon();
+    byId("custom-horizon-field").classList.remove("hidden");
+    byId("custom-horizon-toggle").setAttribute("aria-expanded", "true");
+  }
+  invalidateUsualBasketPreview();
+}
+
+async function repeatUsualBasket() {
+  if (state.usualBasketRepeating || state.usualBasketDirty || !state.usualBasketDraft.size) {
+    return;
+  }
+  state.usualBasketRepeating = true;
+  const revision = state.usualBasketPreviewRevision;
+  renderUsualBasket();
+  try {
+    // Read the current last confirmed plan, not a stale browser-side copy.
+    const current = await request("/household/usual-basket/last-settings");
+    if (revision !== state.usualBasketPreviewRevision || state.usualBasketDirty) return;
+    state.usualBasketRepeatSettings = current.repeat_settings;
+    if (!current.repeat_settings) {
+      showToast("Сначала подтвердите хотя бы одну привычную закупку.", true);
+      return;
+    }
+    applyPreviousRoutineInputs(current.repeat_settings);
+    await previewUsualBasket();
+  } catch (error) {
+    showToast(friendlyError(error), true);
+  } finally {
+    state.usualBasketRepeating = false;
+    renderUsualBasket();
+  }
 }
 
 async function saveUsualBasket() {
@@ -1769,6 +1853,7 @@ async function previewUsualBasket() {
           state.usualBasketPreviewId = null;
           renderPlan(saved.plan);
           await refreshOperationalState();
+          await loadRepeatSettings();
           panel.replaceChildren();
           const note = document.createElement("p");
           note.textContent = "Список сохранён. Покупки пока не совершены: отмечайте и подтверждайте их отдельно.";
@@ -1825,6 +1910,7 @@ for (const button of document.querySelectorAll("[data-view]")) {
 byId("start-home-setup").addEventListener("click", () => setView("home"));
 byId("save-usual-basket").addEventListener("click", saveUsualBasket);
 byId("preview-usual-basket").addEventListener("click", previewUsualBasket);
+byId("repeat-usual-basket").addEventListener("click", repeatUsualBasket);
 // Invalidate displayed plans when the user changes planning assumptions.
 for (const input of ["plan-budget", "plan-currency", "plan-horizon", "custom-horizon-days"]) {
   byId(input).addEventListener("input", invalidateUsualBasketPreview);

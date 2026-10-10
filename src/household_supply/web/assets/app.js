@@ -1684,10 +1684,22 @@ async function loadRepeatSettings() {
   renderUsualBasket();
 }
 
+function parseConfirmedHorizonDays(value) {
+  // The domain accepts Decimal("7.0") and Decimal("1E+1"), while the stand
+  // selects integral days. Normalize exactly, not via floating point rounding.
+  const raw = String(value).trim();
+  const parsed = /^\+?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?$/.exec(raw);
+  if (!parsed || raw.length > 64) return null;
+  const exponentText = raw.match(/[eE]([+-]?\d+)$/)?.[1] || "0";
+  const exponent = Number(exponentText);
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 30) return null;
+  return parseHorizonDays(decimalText(raw));
+}
+
 function applyPreviousRoutineInputs(settings) {
   // These are solely user-approved planning inputs. Neither previous SKUs nor
   // quantities, prices, household state or market observations are replayed.
-  const days = parseHorizonDays(settings.horizon_days);
+  const days = parseConfirmedHorizonDays(settings.horizon_days);
   const amount = normalizeNumberInput(String(settings.budget.amount));
   const currency = byId("plan-currency");
   // The current stand intentionally fixes currency to KGS in a hidden input.

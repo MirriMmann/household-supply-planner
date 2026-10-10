@@ -157,3 +157,27 @@ def test_repeat_does_not_treat_fixed_currency_input_as_select():
     assert 'id="plan-currency" type="hidden" value="KGS"' in html
     assert "settings.budget.currency !== currency.value" in js
     assert "currency.options" not in js
+
+
+def test_repeat_preserves_valid_decimal_horizon_as_approved_input(tmp_path):
+    api = build_demo_app(tmp_path).api
+    set_routine(api)
+    confirmed = save_preview(api, budget="500", days="7.0")
+    saved = repeat_settings(api)
+    assert saved["source_plan_id"] == confirmed["plan_id"]
+    assert saved["horizon_days"] == "7.0"
+    fresh = make_preview(api, budget=saved["budget"]["amount"], days=saved["horizon_days"])
+    assert fresh["plan"]["status"] == "feasible"
+    assert fresh["preview_id"] != confirmed["plan_id"]
+
+
+def test_browser_normalizes_exact_decimal_horizon_without_rounding():
+    from importlib.resources import files
+
+    script = files("household_supply.web").joinpath("assets/app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "function parseConfirmedHorizonDays(value)" in script
+    assert "parseHorizonDays(decimalText(raw))" in script
+    assert "Math.abs(exponent) > 30" in script
+    assert "const days = parseConfirmedHorizonDays(settings.horizon_days)" in script

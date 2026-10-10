@@ -376,6 +376,46 @@ def routine_stand_preview(browser) -> None:
                return y<window.innerHeight-90 &&
                  document.elementFromPoint(x,y)===arguments[0];""", preview_button
         ))
+        # Prove the browser discards an in-flight preview if its inputs change.
+        browser.execute_script("""
+            window.__originalRoutineFetch = window.fetch.bind(window);
+            window.__releaseRoutinePreview = null;
+            window.fetch = (...args) => {
+              const running = window.__originalRoutineFetch(...args);
+              if (args[0] === "/household/usual-basket/preview") {
+                return new Promise(resolve => {
+                  window.__releaseRoutinePreview = () => running.then(resolve);
+                });
+              }
+              return running;
+            };
+        """)
+        preview_button.click()
+        wait.until(lambda d: d.execute_script(
+            "return typeof window.__releaseRoutinePreview === 'function';"
+        ))
+        budget.clear()
+        budget.send_keys("550")
+        browser.execute_script("window.__releaseRoutinePreview();")
+        wait.until(lambda d: not d.find_element(
+            By.ID, "preview-usual-basket"
+        ).get_attribute("disabled"))
+        assert not browser.find_elements(By.ID, "confirm-usual-basket")
+        assert not browser.find_element(By.ID, "usual-basket-preview").is_displayed()
+        browser.execute_script("window.fetch = window.__originalRoutineFetch;")
+        budget.clear()
+        budget.send_keys("500")
+        preview_button = browser.find_element(By.ID, "preview-usual-basket")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview_button,
+        )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", preview_button
+        ))
         preview_button.click()
         wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
             By.ID, "usual-basket-preview"
@@ -388,17 +428,51 @@ def routine_stand_preview(browser) -> None:
         assert api(base, "/household/history")["event_count"] == 0
         assert len(api(base, "/plans?limit=12")["plans"]) == 0
 
+        confirmation = browser.find_element(By.ID, "confirm-usual-basket")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            confirmation,
+        )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", confirmation
+        ))
+        confirmation.click()
+        wait.until(lambda d: "Список сохранён" in d.find_element(
+            By.ID, "usual-basket-preview"
+        ).text)
+        assert len(api(base, "/plans?limit=12")["plans"]) == 1
+        assert api(base, "/household/history")["event_count"] == 0
+        assert browser.find_element(By.ID, "plan-result-panel").is_displayed()
+        viewport_check(browser, "routine saved plan")
+        screenshot(browser, "14-usual-basket-confirmed-no-purchase")
+
         browser.refresh()
         wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
         onboarding = browser.find_element(By.ID, "onboarding-layer")
         if onboarding.is_displayed():
             browser.find_element(By.ID, "onboarding-skip").click()
-        browser.find_element(By.CSS_SELECTOR, "#usual-basket-panel summary").click()
+        summary = browser.find_element(By.CSS_SELECTOR, "#usual-basket-panel summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y>=0 && y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", summary
+        ))
+        summary.click()
         wait.until(lambda d: "Сохранено привычных товаров: 1" in d.find_element(
             By.ID, "usual-basket-status"
         ).text)
         screenshot(browser, "13-usual-basket-reloaded")
-        print("PASS usual basket: select, save, preview, reload, no silent writes", flush=True)
+        assert len(api(base, "/plans?limit=12")["plans"]) == 1
+        assert api(base, "/household/history")["event_count"] == 0
+        print("PASS usual basket: save, preview, explicit confirmation, reload, no silent purchases", flush=True)
 
 
 def main() -> None:

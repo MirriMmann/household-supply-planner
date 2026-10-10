@@ -637,3 +637,5 @@ body.onboarding-open { overflow: hidden; }
 .usual-basket-preview { border: 1px solid var(--line); background: #f7f9f7; border-radius: 12px; padding: 12px; margin-top: 12px; }
 .usual-basket-preview p { margin: 6px 0; }
 .usual-basket-preview ul { margin: 6px 0 0; padding-left: 20px; }
+
+#confirm-usual-basket { width: 100%; min-height: 44px; margin-block: 12px 6px; }

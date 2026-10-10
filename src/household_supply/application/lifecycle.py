@@ -283,6 +283,42 @@ class PlanLifecycleService:
         self.repository.save(record)
         return record
 
+    def commit_result(
+        self,
+        result,
+        *,
+        plan_id: PlanId,
+        decision_basis: Mapping[str, Any],
+    ) -> PlanRecord:
+        """Persist the exact inspected planning result without reacquiring market.
+
+        Used only when an explicit user confirmation authorizes the already
+        previewed result. PlanId acts as the idempotency identity, and the
+        repository's save is create-only.
+        """
+        from .models import ApplicationPlanResult
+        from .persistence import PlanRepositoryError
+
+        if not isinstance(result, ApplicationPlanResult):
+            raise TypeError("commit_result requires validated ApplicationPlanResult")
+        if not isinstance(plan_id, PlanId):
+            raise TypeError("commit_result requires PlanId")
+        if self.repository.get(plan_id) is not None:
+            raise PlanRepositoryError(f"plan record already exists: {plan_id}")
+
+        created_at = self.clock()
+        _require_aware(created_at, label="plan record created_at")
+        if created_at < result.market_compilation.snapshot.captured_at:
+            raise RuntimeError("plan record creation time precedes market evidence capture")
+        record = build_plan_record(
+            plan_id=plan_id,
+            created_at=created_at,
+            result=result,
+            decision_basis=decision_basis,
+        )
+        self.repository.save(record)
+        return record
+
     def get(self, plan_id: PlanId) -> PlanRecord | None:
         return self.repository.get(plan_id)
 

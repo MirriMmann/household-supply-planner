@@ -342,7 +342,9 @@ def routine_stand_preview(browser) -> None:
 
         rows = browser.find_elements(By.CSS_SELECTOR, "#usual-basket-list .usual-basket-item")
         milk = next(x for x in rows if "Молоко" in x.text)
-        Select(milk.find_element(By.TAG_NAME, "select")).select_by_value("one")
+        Select(milk.find_element(
+            By.CSS_SELECTOR, 'select[aria-label^="Резервный объём"]'
+        )).select_by_value("one")
         assert not browser.find_element(By.ID, "save-usual-basket").get_attribute("disabled")
         save = browser.find_element(By.ID, "save-usual-basket")
         browser.execute_script(

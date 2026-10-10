@@ -1583,7 +1583,7 @@ function renderUsualBasket() {
       appendOption(select, "custom", `Указано: ${humanQuantity(fallback)}`);
     }
     select.value = ratio;
-    select.disabled = !enabled.checked || state.usualBasketSaving || (!reference && !fallback);
+    select.disabled = !enabled.checked || state.usualBasketSaving || !reference;
     enabled.disabled = state.usualBasketSaving;
 
     enabled.addEventListener("change", () => {

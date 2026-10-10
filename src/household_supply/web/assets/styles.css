@@ -626,3 +626,14 @@ body.onboarding-open { overflow: hidden; }
   .onboarding-stock-heading { display: grid; gap: 3px; }
   .onboarding-stock-choices { grid-template-columns: repeat(2, 1fr); }
 }
+
+.usual-basket-list { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; margin: 12px 0; }
+.usual-basket-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; background: var(--surface, #fff); border: 1px solid var(--line); border-radius: 10px; }
+.usual-basket-item label { flex: 1 1 140px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.usual-basket-item select { min-height: 42px; min-width: 150px; max-width: 100%; }
+.usual-basket-actions { display: flex; flex-wrap: wrap; gap: 10px; scroll-margin-block: 120px; }
+.usual-basket-actions button { min-height: 44px; }
+.usual-basket-status { color: var(--muted); font-size: .84rem; margin: 10px 0; }
+.usual-basket-preview { border: 1px solid var(--line); background: #f7f9f7; border-radius: 12px; padding: 12px; margin-top: 12px; }
+.usual-basket-preview p { margin: 6px 0; }
+.usual-basket-preview ul { margin: 6px 0 0; padding-left: 20px; }

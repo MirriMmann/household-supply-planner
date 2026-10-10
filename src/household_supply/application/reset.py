@@ -8,6 +8,7 @@ from household_supply.household import (
 )
 
 from .persistence import PlanRepository, PlanRepositoryError
+from .usual_basket_persistence import UsualBasketRepository, UsualBasketRepositoryError
 
 
 class LocalDataResetError(RuntimeError):
@@ -35,6 +36,7 @@ class LocalDataResetService:
 
     household: HouseholdLearningService
     plans: PlanRepository
+    usual_basket_repository: UsualBasketRepository | None = None
 
     def reset(self) -> LocalDataResetResult:
         try:
@@ -50,6 +52,14 @@ class LocalDataResetService:
             raise LocalDataResetError(
                 "household history was cleared but plan history could not be cleared"
             ) from exc
+
+        if self.usual_basket_repository is not None:
+            try:
+                self.usual_basket_repository.clear()
+            except UsualBasketRepositoryError as exc:
+                raise LocalDataResetError(
+                    "household facts and plans were cleared but preferences could not be cleared"
+                ) from exc
 
         return LocalDataResetResult(
             household_events_deleted=household_deleted,

@@ -18,9 +18,9 @@ from household_supply.application import (
     UsualBasketPreparationService,
     UsualBasketRepositoryError,
     UnknownCatalogItemError,
-    catalog_items_by_id,
     serialize_plan_result,
 )
+from household_supply.application.models import catalog_items_by_id
 from household_supply.application.json_api import (
     _parse_money,
     _parse_quantity,

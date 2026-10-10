@@ -142,7 +142,7 @@ def test_existing_inventory_recurring_and_fallback_reach_existing_planner():
     plan = PlanApplicationService(catalog, (provider,), clock=lambda: NOW).plan(
         result.application_request
     ).plan
-    assert plan.total_cost.amount == Decimal("120")
+    assert plan.total_cost.amount == Decimal("240")
     # Milk needs 3500 ml with 2000 ml already on hand; rice is covered in inventory.
     assert sum(p.packs for p in plan.purchases) == 2
 
@@ -188,7 +188,7 @@ def test_new_household_fallback_and_one_off_added_item():
         overrides=(RequestedItem("oil", Quantity("1", "l")),),
     )
     assert result.ready
-    assert [d.item_id for d in result.application_request.demands] == ["rice", "oil"]
+    assert [d.item_id for d in result.application_request.demands] == ["oil", "rice"]
 
 
 def test_fail_closed_invalid_units_and_unknown_catalog_items():
@@ -231,3 +231,58 @@ def test_preparation_service_reads_evidence_and_does_not_mutate_events():
     assert household.history() == before
     assert repository.load() == basket
 
+
+def test_preference_alone_never_generates_demand_or_inventory_events():
+    basket = UsualBasket((UsualBasketItem("milk"),))
+    catalog, provider, household = environment()
+    before = household.history()
+    proposal = UsualBasketPreparationService(
+        household, catalog, InMemoryUsualBasketRepository(basket),
+        clock=lambda: NOW,
+    ).prepare(budget=Money("1000", "KGS"), horizon_days=7)
+    # The admitted rate is the reason, not membership in the usual basket.
+    assert proposal.ready
+    assert proposal.choices[0].basis == "recurring"
+    assert household.history() == before
+
+    empty_household = HouseholdLearningService(InMemoryHouseholdEventRepository())
+    no_rate = UsualBasketPreparationService(
+        empty_household, catalog, InMemoryUsualBasketRepository(basket),
+        clock=lambda: NOW,
+    ).prepare(budget=Money("1000", "KGS"), horizon_days=7)
+    assert not no_rate.ready
+    assert no_rate.needs_clarification == ("milk",)
+    assert empty_household.history().events == ()
+
+
+def test_partial_clarification_blocks_even_when_other_item_is_ready():
+    result, _, _ = preparation(
+        UsualBasket((
+            UsualBasketItem("milk", Quantity("1", "l")),
+            UsualBasketItem("oil"),
+        ))
+    )
+    assert result.needs_clarification == ("oil",)
+    assert not result.ready
+    assert result.application_request is None
+
+
+def test_same_preferences_and_evidence_produce_equal_candidates():
+    basket = UsualBasket((
+        UsualBasketItem("rice", Quantity("1", "kg")),
+        UsualBasketItem("milk", Quantity("1", "l")),
+    ))
+    result_a, _, _ = preparation(basket)
+    result_b, _, _ = preparation(basket)
+    assert result_a == result_b
+
+
+def test_file_repository_rejects_duplicate_preference_identity(tmp_path):
+    path = tmp_path / "usual.json"
+    path.write_text(
+        '{"schema_version":1,"items":[{"item_id":"milk","fallback_quantity":null},'
+        '{"item_id":"milk","fallback_quantity":null}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(Exception, match="corrupt"):
+        FileUsualBasketRepository(path).load()

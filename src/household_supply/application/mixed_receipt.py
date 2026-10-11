@@ -315,10 +315,11 @@ class FileMixedReceiptRepository:
 
 
 class MixedReceiptService:
-    """Explicit receipt confirmation; recovery is idempotent, not transactional.
+    """Explicit receipt confirmation with atomic household batch publication.
 
-    Every partial append remains visible to household readers until replay
-    finishes; the receipt status is pending_recovery, never false 'completed'.
+    Receipt intent is claimed before the batch commits, and the completion
+    marker follows it. If interrupted, retry either commits the whole batch
+    or finds the same already committed batch; never publishes a subset.
     """
 
     def __init__(
@@ -532,19 +533,33 @@ class MixedReceiptService:
                 project_household_state(candidate, as_of=at)
                 depletion_learning_reports(candidate, as_of=at)
 
-            for event in events:
-                previous = self.household.repository.get(event.event_id)
-                if previous is not None:
-                    if previous != event:
-                        raise MixedReceiptConflict("household event conflicts with receipt replay")
-                    continue
-                try:
+            # SQLite batch publishes *all* events under one commit. A crash
+            # before commit exposes zero new Items; after commit exposes all.
+            # The receipt intent/completion marker are separate and retriable.
+            try:
+                self.household.repository.append_batch(
+                    "batch-" + plan_id.value, events
+                )
+            except HouseholdEventRepositoryError as exc:
+                # A pre-M12.17 interrupted receipt might have already
+                # published single-event JSON files. Keep the original
+                # recoverable migration path; NEW receipts never use it.
+                legacy = getattr(self.household.repository, "root", None)
+                if legacy is None or not any(
+                    (legacy / (event.event_id.value + ".json")).is_file()
+                    for event in events
+                ):
+                    raise MixedReceiptStorageError(
+                        "atomic household batch not committed; exact receipt retry required"
+                    ) from exc
+                for event in events:
+                    existing = self.household.repository.get(event.event_id)
+                    if existing is not None:
+                        if existing != event:
+                            raise MixedReceiptConflict(
+                                "legacy event contradicts receipt"
+                            )
+                        continue
                     self.household.record(event)
-                except HouseholdEventRepositoryError as exc:
-                    recorded = self.household.repository.get(event.event_id)
-                    if recorded != event:
-                        raise MixedReceiptStorageError(
-                            "partial mixed receipt needs explicit exact retry"
-                        ) from exc
             self.receipts.complete(receipt)
             return self.status(plan_id)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 from fractions import Fraction
 
 from .money import Money
@@ -31,7 +31,6 @@ def _upper_cent(amount: Fraction) -> Decimal:
     """Budget-safe upper bound in cents, not a prediction of checkout rounding."""
     if amount < 0:
         raise ValueError("weighted price cannot be negative")
-    pennies = (Decimal(amount.numerator) / Decimal(amount.denominator) * 100)
     # Exact rational ceil: no dependence on the active decimal context.
     cents = -(-amount.numerator * 100 // amount.denominator)
     return Decimal(cents) / Decimal(100)
@@ -129,26 +128,18 @@ class VerifiedWeightQuote:
     def __post_init__(self) -> None:
         _positive_mass(self.requested, "requested")
         _positive_mass(self.sellable, "sellable")
-        if not self.observation.available:
-            raise ValueError("cannot quote unavailable weight listing")
-        if (
-            self.observation.item_id != self.rule.item_id
-            or self.observation.source_ref != self.rule.source_ref
-        ):
-            raise ValueError("sale rule and unit-price observation refer to different listing")
-        if self.rule.verified_at > self.observation.observed_at:
-            raise ValueError("sale rule comes from later than the price observation")
-        expected = quote_verified_mass(self.observation, self.rule, self.requested)
-        if expected.sellable != self.sellable or expected.estimated_upper_bound != self.estimated_upper_bound:
+        quantity, upper = _verified_weight_result(
+            self.observation, self.rule, self.requested
+        )
+        if quantity != self.sellable or upper != self.estimated_upper_bound:
             raise ValueError("weighted quote violates seller sellability or cost evidence")
 
 
-def quote_verified_mass(
+def _verified_weight_result(
     observation: WeightedPriceObservation,
     rule: VerifiedWeightSaleRule,
     requested: Quantity,
-) -> VerifiedWeightQuote:
-    """Produce a deterministic price quote ONLY with explicit sellability evidence."""
+) -> tuple[Quantity, Money]:
     _positive_mass(requested, "requested")
     if not observation.available:
         raise ValueError("cannot quote an unavailable weighted listing")
@@ -159,8 +150,21 @@ def quote_verified_mass(
     target = Fraction(requested.base_amount)
     minimum = Fraction(rule.minimum.base_amount)
     increment = Fraction(rule.increment.base_amount)
+    # Allowed sellable amounts are minimum + n * increment; no invented
+    # default increments and no rounding down the requested mass.
     steps = max(0, -(-(target - minimum) // increment))
-    sellable = Quantity(Decimal(minimum.numerator) / Decimal(minimum.denominator) +
-                        Decimal(steps) * rule.increment.base_amount, "g")
-    # This constructor is used for structural validation, without recursion.
-    return object.__new__(VerifiedWeightQuote)  # overwritten below
+    grams = rule.minimum.base_amount + Decimal(steps) * rule.increment.base_amount
+    sellable = Quantity(grams, "g")
+    estimated = estimate_weight_cost(observation, sellable)
+    assert estimated is not None
+    return sellable, estimated
+
+
+def quote_verified_mass(
+    observation: WeightedPriceObservation,
+    rule: VerifiedWeightSaleRule,
+    requested: Quantity,
+) -> VerifiedWeightQuote:
+    """Deterministic *staged* mass selection, not a saved household purchase."""
+    sellable, upper = _verified_weight_result(observation, rule, requested)
+    return VerifiedWeightQuote(observation, rule, requested, sellable, upper)

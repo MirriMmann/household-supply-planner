@@ -110,7 +110,10 @@ def private_receipt_review_demo():
             try:
                 for _ in range(100):
                     if server.poll() is not None:
-                        raise RuntimeError(f"Receipt review pilot stopped; see {log_path}")
+                        raise RuntimeError(
+                            f"Receipt review pilot stopped; see {log_path}\n"
+                            + log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+                        )
                     try:
                         api(base, "/catalog")
                         break

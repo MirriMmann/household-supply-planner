@@ -11,6 +11,10 @@ import pytest
 from examples.m11_local_web import (
     CurrentDemoMarketProvider, build_demo_app, build_demo_catalog,
 )
+from household_supply.application.mixed_receipt import (
+    FileMixedReceiptRepository, MixedActualLine, MixedReceiptConflict,
+    MixedReceiptError, MixedReceiptService, MixedReceiptStorageError,
+)
 from household_supply.application.mixed_plan import (
     FileMixedPlanRepository, MixedPlanConflict, MixedPlanError,
     MixedPlanRecord, MixedPlanService, MixedPlanStorageError,
@@ -25,6 +29,7 @@ from household_supply.market.catalogs.globus_weight_candidates import WEIGHT_CAN
 from household_supply.market.providers.globus_online import HttpTextResponse
 from household_supply.market.providers.globus_weight import GlobusWeightPriceService
 from household_supply.web.mixed_plan_api import MixedPlanWebApi
+from household_supply.web.mixed_receipt_api import MixedReceiptWebApi
 
 
 ONION = next(c for c in WEIGHT_CANDIDATES if c.item_id == "onion")
@@ -289,3 +294,271 @@ def test_seller_rule_can_expire_during_active_preview_before_explicit_save(tmp_p
     with pytest.raises(MixedPlanConflict, match="weighted evidence expired"):
         service.confirm(preview.record.plan_id)
     assert service.repository.get(preview.record.plan_id) is None
+
+
+def _receipt_runtime(tmp_path):
+    app, mixed, _, _ = runtime(tmp_path)
+    with_known_stock(app)
+    plan = mixed.confirm(
+        mixed.preview(demands=mixed_needs(), budget=Money("110", "KGS")).record.plan_id
+    )
+    receipt_service = MixedReceiptService(
+        plans=mixed.repository,
+        receipts=FileMixedReceiptRepository(tmp_path / "mixed-receipts"),
+        household=mixed.shopping.household,
+        catalog=mixed.package_planner.catalog,
+    )
+    return app, plan, receipt_service
+
+
+def _actual(plan, *, mass="290", rice_packs=1, rice_paid="95",
+            onion_paid="14.5", fees="0.5", discount="0", total="110",
+            approved=True, receipt_ref="invoice:household-test-001"):
+    return {
+        "plan_id": plan.plan_id,
+        "receipt_ref": receipt_ref,
+        "occurred_at": datetime.now(timezone.utc),
+        "lines": (
+            MixedActualLine(
+                "onion", "weighted", "", None, Quantity(mass, "g"),
+                Money(onion_paid, "KGS"),
+            ),
+            MixedActualLine(
+                "rice", "fixed_package", "rice-1kg", rice_packs,
+                Quantity(1000 * rice_packs, "g"), Money(rice_paid, "KGS"),
+            ),
+        ),
+        "delivery_and_fees": Money(fees, "KGS"),
+        "discount": Money(discount, "KGS"),
+        "total_paid": Money(total, "KGS"),
+        "price_changes_approved": approved,
+    }
+
+
+def test_mixed_receipt_explicit_actual_grams_paid_fee_and_once_only_events(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    before = app.api.handle("GET", "/household/history").body["event_count"]
+    assert before == 2
+    assert service.status(plan.plan_id)["state"] == "not_received"
+    receipt = _actual(plan)
+    status = service.confirm(**receipt)
+    assert status["state"] == "completed"
+    assert status["receipt"]["total_paid"] == {
+        "amount": "110", "currency": "KGS"
+    }
+    assert sorted(status["credited_items"]) == ["onion", "rice"]
+    assert status["all_demands_fulfilled"] is False
+    assert status["budget_remaining_after_paid"] == {"amount": "0", "currency": "KGS"}
+    coverage = {row["item_id"]: row for row in status["fulfillment"]}
+    assert coverage["onion"]["required_to_buy"] == {"amount": "300", "unit": "g"}
+    assert coverage["onion"]["actual_received"] == {"amount": "290", "unit": "g"}
+    assert coverage["onion"]["still_missing_after_receipt"] == {"amount": "10", "unit": "g"}
+    assert coverage["rice"]["still_missing_after_receipt"] == {"amount": "0", "unit": "g"}
+    assert all(x["posted_to_inventory"] for x in status["fulfillment"])
+    assert len(service.household.history().events) == before + 2
+    state = service.household.state(as_of=datetime.now(timezone.utc))
+    assert state.quantity_for("onion") == Quantity("340", "g")
+    assert state.quantity_for("rice") == Quantity("1050", "g")
+    assert app.api.handle("GET", "/plans?limit=10").body["plans"] == []
+    assert service.confirm(**receipt)["state"] == "completed"
+    assert len(service.household.history().events) == before + 2
+
+    # A restarted process compares the exact receipt identity, preserving
+    # 290g == 0.29kg and 14.50 == 14.5 in canonical values.
+    recovered = MixedReceiptService(
+        plans=FileMixedPlanRepository(tmp_path / "mixed-plans"),
+        receipts=FileMixedReceiptRepository(tmp_path / "mixed-receipts"),
+        household=service.household,
+        catalog=service.catalog,
+    )
+    equivalent = dict(receipt)
+    equivalent["lines"] = (
+        MixedActualLine(
+            "onion", "weighted", "", None, Quantity("0.29", "kg"),
+            Money("14.50", "KGS"),
+        ),
+        receipt["lines"][1],
+    )
+    assert recovered.confirm(**equivalent)["state"] == "completed"
+    assert len(recovered.household.history().events) == before + 2
+
+
+def test_mixed_receipt_rejects_uncounted_or_unapproved_overpriced_delivery(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    prior = len(service.household.history().events)
+    cases = [
+        ({"lines": _actual(plan)["lines"][:1],
+          "total_paid": Money("15", "KGS")}, "every planned Item"),
+        ({"lines": _actual(plan)["lines"] + _actual(plan)["lines"][:1]}, "unique"),
+        ({"lines": (
+            MixedActualLine("onion", "weighted", "", None, Quantity("301", "g"),
+                            Money("14.5", "KGS")),
+            _actual(plan)["lines"][1],
+        )}, "received mass exceeds"),
+        ({"price_changes_approved": False}, "delivery/fees need explicit approval"),
+        ({"total_paid": Money("111", "KGS")}, "total differs"),
+        ({"total_paid": Money("111", "KGS"),
+          "delivery_and_fees": Money("1.5", "KGS")}, "approved budget"),
+        ({"lines": (
+            MixedActualLine("onion", "weighted", "", None, Quantity("290", "g"),
+                            Money("20", "KGS")),
+            _actual(plan)["lines"][1],
+        ), "delivery_and_fees": Money("0", "KGS"),
+          "total_paid": Money("115", "KGS")}, "approved budget"),
+    ]
+    for replacement, message in cases:
+        payload = dict(_actual(plan), **replacement)
+        with pytest.raises((MixedReceiptError, MixedReceiptConflict), match=message):
+            service.confirm(**payload)
+    assert len(service.household.history().events) == prior
+    assert service.receipts.get(plan.plan_id) is None
+
+
+def test_receipt_price_change_must_be_explicit_even_with_budget_headroom(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    # Change with equal-budget total: actual onion 16 > quoted 15, rice 93 < 95.
+    payload = _actual(
+        plan, onion_paid="16", rice_paid="93",
+        fees="0", discount="0", total="109", approved=False,
+    )
+    with pytest.raises(MixedReceiptConflict, match="price increased"):
+        service.confirm(**payload)
+    payload["price_changes_approved"] = True
+    assert service.confirm(**payload)["state"] == "completed"
+
+
+def test_receipt_one_plan_claim_rejects_changed_payment_reference(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    receipt = _actual(plan)
+    service.confirm(**receipt)
+    with pytest.raises(MixedReceiptConflict, match="different receipt"):
+        service.confirm(**dict(receipt, receipt_ref="invoice:replacement"))
+    alternate = dict(receipt)
+    alternate["lines"] = (
+        MixedActualLine("onion", "weighted", "", None,
+                        Quantity("280", "g"), Money("14.5", "KGS")),
+        receipt["lines"][1],
+    )
+    with pytest.raises(MixedReceiptConflict, match="different receipt"):
+        service.confirm(**alternate)
+    assert len(service.household.history().events) == 4
+
+
+def test_partial_receipt_recovery_is_explicit_and_retries_same_evidence(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    actual = _actual(plan)
+    original_household = service.household
+
+    class FailingHousehold:
+        def __init__(self):
+            self.repository = original_household.repository
+            self.count = 0
+
+        def history(self):
+            return original_household.history()
+
+        def record(self, event):
+            self.count += 1
+            if self.count == 2:
+                raise RuntimeError("simulated power-loss after first receipt item")
+            return original_household.record(event)
+
+    service.household = FailingHousehold()
+    with pytest.raises(RuntimeError, match="power-loss"):
+        service.confirm(**actual)
+    service.household = original_household
+    halfway = service.status(plan.plan_id)
+    assert halfway["state"] == "pending_recovery"
+    assert halfway["requires_retry"] is True
+    assert len(halfway["credited_items"]) == 1
+    assert len(service.household.history().events) == 3
+
+    with pytest.raises(MixedReceiptConflict, match="different receipt"):
+        service.confirm(**dict(actual, receipt_ref="invoice:changed-during-recovery"))
+    assert service.confirm(**actual)["state"] == "completed"
+    assert len(service.household.history().events) == 4
+    assert service.confirm(**actual)["state"] == "completed"
+
+
+def test_corrupted_stored_mixed_receipt_fails_closed(tmp_path):
+    _, plan, service = _receipt_runtime(tmp_path)
+    service.confirm(**_actual(plan))
+    file = service.receipts.root / "intents" / f"{plan.plan_id.value}.json"
+    payload = json.loads(file.read_text(encoding="utf-8"))
+    payload["body"]["total_paid"]["amount"] = "0"
+    file.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(MixedReceiptStorageError, match="safely read"):
+        service.status(plan.plan_id)
+
+
+def test_mixed_receipt_api_guarded_and_has_no_live_globus_access(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    from dataclasses import replace
+
+    api = replace(
+        app.api, mixed_receipt_api=MixedReceiptWebApi(service),
+    )
+    route = f"/mixed/plans/{plan.plan_id.value}/receipt"
+    assert app.api.handle("POST", route, {}).status == 404
+    assert api.handle("GET", route).body["state"] == "not_received"
+    payload = {
+        "receipt_ref": "invoice:api-test-001",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "lines": [
+            {"kind": "weighted", "item_id": "onion",
+             "actual_mass": {"amount": "290", "unit": "g"},
+             "paid": {"amount": "14.5", "currency": "KGS"}},
+            {"kind": "fixed_package", "item_id": "rice",
+             "sku_id": "rice-1kg", "packs": 1,
+             "paid": {"amount": "95", "currency": "KGS"}},
+        ],
+        "delivery_and_fees": {"amount": "0.5", "currency": "KGS"},
+        "discount": {"amount": "0", "currency": "KGS"},
+        "total_paid": {"amount": "110", "currency": "KGS"},
+        "price_changes_approved": True,
+    }
+    recorded = api.handle("POST", route, payload)
+    assert recorded.status == 201, recorded.body
+    assert recorded.body["state"] == "completed"
+    assert api.handle("GET", route).body["state"] == "completed"
+    assert api.handle("POST", route, payload).status == 201
+    assert api.handle("POST", route, {**payload, "approval_from_store": True}).status == 422
+    assert api.handle("POST", route, {**payload, "lines": payload["lines"][:1]}).status == 422
+    assert api.handle("POST", route + "?mutation=1", payload).status == 400
+    assert app.api.handle("GET", "/plans?limit=10").body["plans"] == []
+    assert app.api.handle("GET", "/household/history").body["event_count"] == 4
+
+
+def test_mixed_receipt_can_fully_cover_need_with_exact_received_mass(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    receipt = _actual(
+        plan, mass="300", onion_paid="15",
+        fees="0", discount="0", total="110", approved=False,
+    )
+    status = service.confirm(**receipt)
+    assert status["state"] == "completed"
+    assert status["all_demands_fulfilled"] is True
+    assert all(x["fulfilled"] for x in status["fulfillment"])
+    assert all(
+        x["still_missing_after_receipt"]["amount"] == "0"
+        for x in status["fulfillment"]
+    )
+
+
+def test_receipt_discount_and_delivery_are_accounted_to_paid_total(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    receipt = _actual(
+        plan, fees="1", discount="0.5", total="110", approved=True,
+    )
+    status = service.confirm(**receipt)
+    assert status["state"] == "completed"
+    assert status["receipt"]["delivery_and_fees"] == {
+        "amount": "1", "currency": "KGS"
+    }
+    assert status["receipt"]["discount"] == {
+        "amount": "0.5", "currency": "KGS"
+    }
+    assert status["receipt"]["total_paid"] == {
+        "amount": "110", "currency": "KGS"
+    }
+    assert len(service.household.history().events) == 4

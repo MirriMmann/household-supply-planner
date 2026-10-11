@@ -444,40 +444,73 @@ def test_receipt_one_plan_claim_rejects_changed_payment_reference(tmp_path):
     assert len(service.household.history().events) == 4
 
 
-def test_partial_receipt_recovery_is_explicit_and_retries_same_evidence(tmp_path):
+def test_atomic_receipt_failure_before_batch_commit_is_invisible_and_retriable(tmp_path):
     app, plan, service = _receipt_runtime(tmp_path)
     actual = _actual(plan)
-    original_household = service.household
+    original = service.household
+    from household_supply.household import HouseholdEventRepositoryError
+
+    class FailingRepo:
+        def __init__(self, base):
+            self.base = base
+        def get(self, event_id):
+            return self.base.get(event_id)
+        def append_batch(self, batch_id, events):
+            raise HouseholdEventRepositoryError("simulated failure before commit")
 
     class FailingHousehold:
-        def __init__(self):
-            self.repository = original_household.repository
-            self.count = 0
-
+        def __init__(self, original_household):
+            self.repository = FailingRepo(original_household.repository)
         def history(self):
-            return original_household.history()
+            return original.history()
 
-        def record(self, event):
-            self.count += 1
-            if self.count == 2:
-                raise RuntimeError("simulated power-loss after first receipt item")
-            return original_household.record(event)
-
-    service.household = FailingHousehold()
-    with pytest.raises(RuntimeError, match="power-loss"):
+    service.household = FailingHousehold(original)
+    with pytest.raises(MixedReceiptStorageError, match="atomic household batch not committed"):
         service.confirm(**actual)
-    service.household = original_household
+    service.household = original
     halfway = service.status(plan.plan_id)
     assert halfway["state"] == "pending_recovery"
     assert halfway["requires_retry"] is True
-    assert len(halfway["credited_items"]) == 1
-    assert len(service.household.history().events) == 3
-
+    assert halfway["credited_items"] == []
+    assert len(original.history().events) == 2
+    assert original.state(as_of=datetime.now(timezone.utc)).quantity_for("onion") == Quantity("50", "g")
     with pytest.raises(MixedReceiptConflict, match="different receipt"):
         service.confirm(**dict(actual, receipt_ref="invoice:changed-during-recovery"))
     assert service.confirm(**actual)["state"] == "completed"
-    assert len(service.household.history().events) == 4
+    assert len(original.history().events) == 4
+
+
+def test_atomic_receipt_failure_after_commit_is_wholly_visible_and_retriable(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    actual = _actual(plan)
+    original = service.household
+    from household_supply.household import HouseholdEventRepositoryError
+
+    class FailingRepo:
+        def __init__(self, base):
+            self.base = base
+        def get(self, event_id):
+            return self.base.get(event_id)
+        def append_batch(self, batch_id, events):
+            self.base.append_batch(batch_id, events)
+            raise HouseholdEventRepositoryError("simulated crash after DB commit")
+
+    class FailingHousehold:
+        def __init__(self, original_household):
+            self.repository = FailingRepo(original_household.repository)
+        def history(self):
+            return original.history()
+
+    service.household = FailingHousehold(original)
+    with pytest.raises(MixedReceiptStorageError, match="exact receipt retry required"):
+        service.confirm(**actual)
+    service.household = original
+    pending = service.status(plan.plan_id)
+    assert pending["state"] == "pending_recovery"
+    assert sorted(pending["credited_items"]) == ["onion", "rice"]
+    assert len(original.history().events) == 4
     assert service.confirm(**actual)["state"] == "completed"
+    assert len(original.history().events) == 4
 
 
 def test_corrupted_stored_mixed_receipt_fails_closed(tmp_path):

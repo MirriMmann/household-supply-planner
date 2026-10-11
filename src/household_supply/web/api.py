@@ -20,6 +20,7 @@ from household_supply.market.catalogs.globus_weight_candidates import (
 from .usual_basket_api import UsualBasketWebApi
 from .weighted_api import WeightedReferenceWebApi
 from .weighted_procurement_api import WeightedProcurementWebApi
+from .shopping_readiness_api import ShoppingReadinessWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -149,9 +150,15 @@ class HouseholdWebJsonApi:
     recipe_api: RecipeWebApi | None = None
     weighted_api: WeightedReferenceWebApi | None = None
     weighted_procurement_api: WeightedProcurementWebApi | None = None
+    shopping_readiness_api: ShoppingReadinessWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.shopping_readiness_api is not None
+            and self.shopping_readiness_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.weighted_procurement_api is not None
             and self.weighted_procurement_api.accepts_json_body(method, path)
@@ -191,6 +198,11 @@ class HouseholdWebJsonApi:
         target = urlsplit(path)
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
+
+        if target.path == "/shopping/preview" or target.path == "/shopping/recipe-candidates":
+            if self.shopping_readiness_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.shopping_readiness_api.handle(method, path, payload)
 
         if target.path == "/recipes" or target.path.startswith("/recipes/"):
             if self.recipe_api is None:

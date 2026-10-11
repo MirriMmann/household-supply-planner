@@ -389,6 +389,62 @@ def parse_globus_online_demo_product(html: str) -> GlobusOnlineParsedProduct:
     return GlobusOnlineParsedProduct(name=name, price=price, available=available)
 
 
+
+@dataclass(frozen=True, slots=True)
+class GlobusWeightedParsedProduct:
+    """Only an observed reference price per kg, never a sellable package."""
+    name: str
+    price_per_kg: Money | None
+    available: bool
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or type(self.available) is not bool:
+            raise ValueError("weighted product requires a name and availability")
+        if self.available != (self.price_per_kg is not None):
+            raise ValueError("available weighted product requires a price per kg")
+        if self.price_per_kg is not None and (
+            self.price_per_kg.amount < 0 or self.price_per_kg.currency != "KGS"
+        ):
+            raise ValueError("weighted product must have a nonnegative KGS unit price")
+
+
+def parse_globus_online_weight_product(html: str) -> GlobusWeightedParsedProduct:
+    """Safely parse public per-kg prices, without inventing min/step constraints."""
+    parser = _ProductPageParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception as exc:
+        raise GlobusOnlineParseError("invalid Globus weighted HTML") from exc
+    name = parser.title
+    if not name:
+        raise GlobusOnlineParseError("Globus weighted product lacks product h1")
+    visible = parser.after_h1_text
+    lowered = visible.casefold()
+    page_lowered = parser.visible_text.casefold()
+    if not (
+        _DEMO_MARKER in page_lowered
+        or (_NO_ADDRESS_MARKER in page_lowered and _CART_MARKER in page_lowered)
+    ):
+        raise GlobusOnlineParseError("Globus weight page lacks addressless demo scope")
+    available = not any(marker in lowered for marker in _UNAVAILABLE_MARKERS)
+    if not available:
+        return GlobusWeightedParsedProduct(name, None, False)
+    if _ADD_TO_CART_MARKER not in lowered:
+        raise GlobusOnlineParseError("weighted listing has no add-to-cart action")
+    matches = list(_PRICE_RE.finditer(visible))
+    if not matches or any(not match.group("perkg") for match in matches):
+        raise GlobusOnlineUnsupportedListingError(
+            "weighted listing requires unambiguous price expressed as som/kg"
+        )
+    amounts = tuple(dict.fromkeys(
+        _parse_decimal_amount(match.group("amount")) for match in matches
+    ))
+    if len(amounts) != 1:
+        raise GlobusOnlineParseError("weighted listing has ambiguous per-kg prices")
+    return GlobusWeightedParsedProduct(name, Money(amounts[0], "KGS"), True)
+
+
 def _stable_observation_id(
     *, seller_id: str, external_product_id: str, observed_at: datetime
 ) -> str:

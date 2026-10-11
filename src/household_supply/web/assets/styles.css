@@ -639,3 +639,111 @@ body.onboarding-open { overflow: hidden; }
 .usual-basket-preview ul { margin: 6px 0 0; padding-left: 20px; }
 
 #confirm-usual-basket { width: 100%; min-height: 44px; margin-block: 12px 6px; }
+
+#repeat-usual-basket { min-height: 44px; scroll-margin-block: 120px; }
+.weighted-form { display: grid; gap: 8px; margin-top: 12px; }
+.weighted-form label { font-weight: 650; }
+.weighted-form select, .weighted-form input, .weighted-form button { width: 100%; min-height: 44px; min-width: 0; }
+#weighted-estimate-result { color: var(--muted); font-size: .9rem; margin-top: 10px; overflow-wrap: anywhere; }
+
+.recipes-list { display: grid; gap: 9px; margin-top: 12px; }
+.recipe-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; }
+.recipe-card summary { cursor: pointer; font-weight: 650; }
+.recipe-card ul, .recipe-card ol { margin-block: 10px; padding-left: 22px; }
+.recipe-card li { padding-block: 3px; }
+.recipe-meta, .recipe-quote, #recipes-status { color: var(--muted); font-size: .87rem; }
+.recipe-actions { margin-top: 10px; display: grid; gap: 8px; }
+.recipe-actions button { min-height: 44px; scroll-margin-block: 100px; }
+
+.shopping-readiness-inputs { display: grid; gap: 9px; margin-block: 12px; }
+.shopping-readiness-inputs label { font-weight: 650; font-size: .9rem; }
+.shopping-readiness-inputs select, .shopping-readiness-inputs input,
+.shopping-readiness-inputs button { min-width: 0; min-height: 44px; width: 100%; }
+.shopping-readiness-result { margin-block: 8px; overflow-wrap: anywhere; }
+.shopping-readiness-result ul { padding-left: 22px; }
+.shopping-readiness-result li { margin-block: 6px; }
+.shopping-readiness-result p, #shopping-readiness-status { color: var(--muted); font-size: .87rem; }
+
+/* M12.18 private receipt review: responsive, no exposed checkout actions. */
+.mixed-receipt-panel[hidden],
+.mixed-receipt-panel [hidden] { display: none !important; }
+.mixed-receipt-panel { margin-block: 16px 24px; }
+.mixed-receipt-fields, .mixed-receipt-lines { display: grid; gap: 12px; }
+.mixed-receipt-fields { margin-block: 14px; }
+.mixed-receipt-field { display: grid; gap: 5px; min-width: 0; }
+.mixed-receipt-field > span { font-size: .9rem; font-weight: 600; }
+.mixed-receipt-fields > label:not(.mixed-receipt-consent) { font-weight: 600; font-size: .9rem; }
+.mixed-receipt-fields input, .mixed-receipt-fields select,
+.mixed-receipt-line input, .mixed-receipt-line select {
+  min-height: 44px; width: 100%; box-sizing: border-box; max-width: 100%;
+}
+.mixed-receipt-line {
+  border: 1px solid var(--line, #d8dcdd);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mixed-receipt-line h4, .mixed-receipt-line p { margin: 0; }
+.mixed-receipt-line p { font-size: .9rem; }
+.mixed-receipt-consent {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px; border-radius: 9px;
+  background: var(--surface-soft, #f4f6f7);
+  font-size: .9rem;
+}
+.mixed-receipt-consent > input {
+  flex: 0 0 auto; width: 21px; height: 21px; min-height: 21px;
+  margin: 1px 0 0;
+}
+#mixed-receipt-reviewed, #mixed-receipt-claimed { margin-block: 15px; }
+#mixed-receipt-reviewed-details { overflow-wrap: anywhere; }
+#mixed-receipt-status.error { color: #ab2433; }
+#mixed-receipt-preview, #mixed-receipt-confirm, #mixed-receipt-retry {
+  width: 100%; min-height: 44px;
+}
+@media (min-width: 760px) {
+  .mixed-receipt-lines { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* M12.19 mixed shopping: only rendered when the private plan AND receipt
+   capabilities have been explicitly installed. No seller checkout implied. */
+.mixed-shopping-panel[hidden],
+.mixed-shopping-panel [hidden] { display: none !important; }
+#shopping-to-mixed-recipe[hidden] { display: none !important; }
+.mixed-shopping-panel { margin-block: 16px 24px; }
+.mixed-shopping-fields, .mixed-shopping-demands {
+  display: grid; gap: 12px; margin-block: 14px;
+}
+.mixed-shopping-fields > label { font-size: .9rem; font-weight: 600; }
+.mixed-shopping-fields input:not([type="radio"]):not([type="checkbox"]),
+.mixed-shopping-fields select,
+.mixed-shopping-demand-row input,
+.mixed-shopping-demand-row select {
+  min-height: 44px; width: 100%; max-width: 100%; box-sizing: border-box;
+}
+.mixed-shopping-source { border: 0; padding: 0; display: flex; gap: 12px;
+  flex-wrap: wrap; min-width: 0; }
+.mixed-shopping-source legend { font-weight: 600; margin-bottom: 10px; }
+.mixed-shopping-source label { display: inline-flex; gap: 8px; align-items: center; }
+.mixed-shopping-demand-row { display: grid; grid-template-columns: minmax(0, 1fr) 75px 80px;
+  gap: 8px; border: 1px solid var(--line, #d8dcdd); padding: 12px;
+  border-radius: 12px; }
+.mixed-shopping-demand-row button { grid-column: 1 / -1; justify-self: start; }
+.mixed-shopping-line { border: 1px solid var(--line, #d8dcdd);
+  border-radius: 12px; padding: 12px; margin-block: 8px; overflow-wrap: anywhere; }
+.mixed-shopping-line p { margin-block: 6px; font-size: .9rem; }
+.mixed-shopping-consent { display: flex; gap: 10px; padding: 12px;
+  border-radius: 9px; background: var(--surface-soft, #f4f6f7); }
+.mixed-shopping-consent > input { width: 21px; height: 21px; min-height: 21px;
+  flex: 0 0 auto; margin: 1px 0 0; }
+#mixed-shopping-result, #mixed-shopping-saved { margin-block: 16px; }
+#mixed-shopping-status.error { color: #ab2433; }
+#mixed-shopping-preview, #mixed-shopping-save, #mixed-shopping-open-receipt {
+  width: 100%; min-height: 44px;
+}
+@media (max-width: 360px) {
+  .mixed-shopping-demand-row { grid-template-columns: minmax(0, 1fr) 65px 65px; gap: 5px; }
+}

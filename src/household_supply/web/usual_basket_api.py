@@ -113,6 +113,15 @@ class UsualBasketWebApi:
                         raise UsualBasketError(f"incompatible fallback quantity: {entry.item_id}")
                 self.preparation.basket_repository.save(basket)
                 return JsonApiResponse(200, {"usual_basket": _serialize_basket(basket)})
+            if target.path == "/household/usual-basket/last-settings":
+                if method != "GET":
+                    return JsonApiResponse(405, {"error": "method_not_allowed"})
+                if self.confirmation is None:
+                    return JsonApiResponse(404, {"error": "not_found"})
+                return JsonApiResponse(
+                    200,
+                    {"repeat_settings": self.confirmation.last_confirmed_settings()},
+                )
             if target.path == "/household/usual-basket/confirm":
                 if method != "POST":
                     return JsonApiResponse(405, {"error": "method_not_allowed"})

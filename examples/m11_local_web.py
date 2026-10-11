@@ -28,6 +28,9 @@ from household_supply.application import (
     UsualBasketPreparationService,
     UsualBasketPlanCommitService,
 )
+from household_supply.application.recipe_commit import RecipePlanCommitService
+from household_supply.application.shopping_readiness import ShoppingReadinessService
+from household_supply.web.shopping_readiness_api import ShoppingReadinessWebApi
 from household_supply.domain import (
     CatalogBinding,
     CatalogSnapshot,
@@ -41,11 +44,14 @@ from household_supply.domain import (
 )
 from household_supply.household import FileHouseholdEventRepository, HouseholdLearningService
 from household_supply.market import GlobusCatalogProviderFactory
+from household_supply.market.providers.globus_weight import GlobusWeightPriceService
+from household_supply.web.weighted_api import WeightedReferenceWebApi
 from household_supply.web import (
     HouseholdLocalWebApp,
     HouseholdWebJsonApi,
     serve_local_web,
     UsualBasketWebApi,
+    RecipeWebApi,
 )
 
 
@@ -114,6 +120,7 @@ def _build_web_app(
     catalog: CatalogSnapshot,
     planner,
     allow_remote_hosts: bool = False,
+    weighted_prices: GlobusWeightPriceService | None = None,
 ) -> HouseholdLocalWebApp:
     household_repository = FileHouseholdEventRepository(
         data_dir / "household-events"
@@ -140,6 +147,17 @@ def _build_web_app(
     )
     web_api = HouseholdWebJsonApi(
         closed_loop, catalog, reset_service,
+        shopping_readiness_api=ShoppingReadinessWebApi(
+            ShoppingReadinessService(household, catalog, clock=utc_now)
+        ),
+        weighted_api=(
+            None if weighted_prices is None
+            else WeightedReferenceWebApi(weighted_prices)
+        ),
+        recipe_api=RecipeWebApi(
+            household, planner, clock=utc_now,
+            confirmation=RecipePlanCommitService(household, lifecycle),
+        ),
         usual_basket_api=UsualBasketWebApi(
             usual_basket, planner,
             confirmation=UsualBasketPlanCommitService(usual_basket, lifecycle),
@@ -184,6 +202,7 @@ def build_live_globus_app(
         catalog=catalog,
         planner=planner,
         allow_remote_hosts=allow_remote_hosts,
+        weighted_prices=GlobusWeightPriceService(),
     )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .recipe_api import RecipeWebApi
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -11,8 +13,16 @@ from household_supply.application import (
     LocalDataResetService,
 )
 from household_supply.domain import CatalogSnapshot
+from household_supply.market.catalogs.globus_weight_candidates import (
+    serialize_weight_candidates,
+)
 
 from .usual_basket_api import UsualBasketWebApi
+from .weighted_api import WeightedReferenceWebApi
+from .weighted_procurement_api import WeightedProcurementWebApi
+from .shopping_readiness_api import ShoppingReadinessWebApi
+from .mixed_plan_api import MixedPlanWebApi
+from .mixed_receipt_api import MixedReceiptWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -139,9 +149,45 @@ class HouseholdWebJsonApi:
     catalog: CatalogSnapshot
     reset_service: LocalDataResetService | None = None
     usual_basket_api: UsualBasketWebApi | None = None
+    recipe_api: RecipeWebApi | None = None
+    weighted_api: WeightedReferenceWebApi | None = None
+    weighted_procurement_api: WeightedProcurementWebApi | None = None
+    shopping_readiness_api: ShoppingReadinessWebApi | None = None
+    mixed_plan_api: MixedPlanWebApi | None = None
+    mixed_receipt_api: MixedReceiptWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.mixed_receipt_api is not None
+            and self.mixed_receipt_api.accepts_json_body(method, path)
+        ):
+            return True
+        if (
+            self.mixed_plan_api is not None
+            and self.mixed_plan_api.accepts_json_body(method, path)
+        ):
+            return True
+        if (
+            self.shopping_readiness_api is not None
+            and self.shopping_readiness_api.accepts_json_body(method, path)
+        ):
+            return True
+        if (
+            self.weighted_procurement_api is not None
+            and self.weighted_procurement_api.accepts_json_body(method, path)
+        ):
+            return True
+        if (
+            self.weighted_api is not None
+            and self.weighted_api.accepts_json_body(method, path)
+        ):
+            return True
+        if (
+            self.recipe_api is not None
+            and self.recipe_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.usual_basket_api is not None
             and self.usual_basket_api.accepts_json_body(method, path)
@@ -167,10 +213,67 @@ class HouseholdWebJsonApi:
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
 
-        if target.path in {"/household/usual-basket", "/household/usual-basket/preview", "/household/usual-basket/confirm"}:
+        if (
+            target.path.startswith("/mixed/plans/")
+            and (
+                target.path.endswith("/receipt")
+                or target.path.endswith("/receipt/preview")
+                or target.path.endswith("/receipt/retry")
+            )
+        ):
+            if self.mixed_receipt_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.mixed_receipt_api.handle(method, path, payload)
+
+        if target.path == "/mixed/plans" or target.path.startswith("/mixed/plans/"):
+            if self.mixed_plan_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.mixed_plan_api.handle(method, path, payload)
+
+        if target.path == "/shopping/preview" or target.path == "/shopping/recipe-candidates":
+            if self.shopping_readiness_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.shopping_readiness_api.handle(method, path, payload)
+
+        if target.path == "/recipes" or target.path.startswith("/recipes/"):
+            if self.recipe_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.recipe_api.handle(method, path, payload)
+
+        if target.path in {"/household/usual-basket", "/household/usual-basket/preview", "/household/usual-basket/confirm", "/household/usual-basket/last-settings"}:
             if self.usual_basket_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.usual_basket_api.handle(method, path, payload)
+
+        if target.path == "/weighted/plans" or target.path.startswith("/weighted/plans/"):
+            if self.weighted_procurement_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.weighted_procurement_api.handle(method, path, payload)
+
+        if target.path == "/catalog/weighted-candidates/estimate":
+            if self.weighted_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.weighted_api.handle(method, path, payload)
+
+        if target.path == "/catalog/weighted-candidates":
+            if target.query:
+                return JsonApiResponse(400, {"error": "invalid_query"})
+            if normalized_method != "GET":
+                return JsonApiResponse(405, {"error": "method_not_allowed"})
+            return JsonApiResponse(200, {
+                "candidates": list(serialize_weight_candidates()),
+                "estimate_supported": self.weighted_api is not None,
+                "seller_weight_rules_verified": False,
+                "mixed_plan_enabled": self.mixed_plan_api is not None,
+                "mixed_receipt_review_enabled": (
+                    self.mixed_plan_api is not None
+                    and self.mixed_receipt_api is not None
+                ),
+                "notice": (
+                    "Весовые позиции приведены только для исследования рынка. "
+                    "HSM пока не может создавать из них закупки или утверждать актуальную цену."
+                ),
+            })
 
         if target.path == "/catalog":
             if target.query:
@@ -216,6 +319,8 @@ class HouseholdWebJsonApi:
                 )
             if self.usual_basket_api is not None and self.usual_basket_api.confirmation is not None:
                 self.usual_basket_api.confirmation.discard_previews()
+            if self.recipe_api is not None and self.recipe_api.confirmation is not None:
+                self.recipe_api.confirmation.discard_previews()
             return JsonApiResponse(
                 200,
                 {

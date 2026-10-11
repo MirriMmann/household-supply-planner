@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -20,6 +20,7 @@ from .events import (
     event_kind,
 )
 from .history import HouseholdHistory
+from .batch_journal import HouseholdBatchJournal, BatchJournalError, BatchJournalConflict
 
 
 _EVENT_SCHEMA_VERSION = 1
@@ -289,6 +290,8 @@ def deserialize_household_event(value: Mapping[str, Any]) -> HouseholdEvent:
 class HouseholdEventRepository(Protocol):
     def append(self, event: HouseholdEvent) -> None: ...
 
+    def append_batch(self, batch_id: str, events: tuple[HouseholdEvent, ...]) -> None: ...
+
     def get(self, event_id: HouseholdEventId) -> HouseholdEvent | None: ...
 
     def history(self) -> HouseholdHistory: ...
@@ -299,6 +302,7 @@ class HouseholdEventRepository(Protocol):
 class InMemoryHouseholdEventRepository:
     def __init__(self) -> None:
         self._events: dict[HouseholdEventId, HouseholdEvent] = {}
+        self._batches: dict[str, tuple[HouseholdEvent, ...]] = {}
 
     def append(self, event: HouseholdEvent) -> None:
         if event.event_id in self._events:
@@ -306,6 +310,24 @@ class InMemoryHouseholdEventRepository:
                 f"household event already exists: {event.event_id}"
             )
         self._events[event.event_id] = event
+
+    def append_batch(self, batch_id: str, events: tuple[HouseholdEvent, ...]) -> None:
+        from .events import HouseholdEventId as Id
+        Id(batch_id)
+        events = tuple(events)
+        ids = [event.event_id for event in events]
+        if not 1 <= len(events) <= 32 or ids != sorted(set(ids)):
+            raise HouseholdEventRepositoryError("invalid batch item count/order/identity")
+        existing = self._batches.get(batch_id)
+        if existing is not None:
+            if existing != events:
+                raise HouseholdEventRepositoryError("batch ID already committed with different events")
+            return
+        if any(event_id in self._events for event_id in ids):
+            raise HouseholdEventRepositoryError("batch contains previously recorded event")
+        # Single in-memory operation: cannot expose intermediate membership.
+        self._events.update({event.event_id: event for event in events})
+        self._batches[batch_id] = events
 
     def get(self, event_id: HouseholdEventId) -> HouseholdEvent | None:
         return self._events.get(event_id)
@@ -320,6 +342,7 @@ class InMemoryHouseholdEventRepository:
     def clear(self) -> int:
         count = len(self._events)
         self._events.clear()
+        self._batches.clear()
         return count
 
 
@@ -329,6 +352,9 @@ class FileHouseholdEventRepository:
 
     root: Path
     max_event_bytes: int = 256 * 1024
+    _batch_journal: HouseholdBatchJournal = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         root = Path(self.root)
@@ -345,9 +371,25 @@ class FileHouseholdEventRepository:
                 f"household event repository root is not a directory: {root}"
             )
         object.__setattr__(self, "root", root.resolve())
+        try:
+            object.__setattr__(
+                self, "_batch_journal", HouseholdBatchJournal(root.resolve())
+            )
+        except BatchJournalError as exc:
+            raise HouseholdEventRepositoryError("cannot open batch journal") from exc
 
     def _path(self, event_id: HouseholdEventId) -> Path:
         return self.root / f"{event_id.value}.json"
+
+    def append_batch(
+        self, batch_id: str, events: tuple[HouseholdEvent, ...]
+    ) -> None:
+        try:
+            self._batch_journal.append_batch(batch_id, tuple(events))
+        except BatchJournalError as exc:
+            raise HouseholdEventRepositoryError(
+                f"cannot commit atomic household batch: {exc}"
+            ) from exc
 
     def append(self, event: HouseholdEvent) -> None:
         target = self._path(event.event_id)
@@ -367,23 +409,28 @@ class FileHouseholdEventRepository:
             )
         temporary_path: Path | None = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                dir=self.root,
-                prefix=f".{event.event_id.value}.",
-                suffix=".tmp",
-                delete=False,
-            ) as stream:
-                temporary_path = Path(stream.name)
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.link(temporary_path, target)
+            with self._batch_journal.writer() as conn:
+                if self._batch_journal.member_exists(event.event_id, conn=conn):
+                    raise HouseholdEventRepositoryError(
+                        f"household event ID already exists in batch: {event.event_id}"
+                    )
+                with tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=self.root,
+                    prefix=f".{event.event_id.value}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
+                    temporary_path = Path(stream.name)
+                    stream.write(encoded)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.link(temporary_path, target)
         except FileExistsError as exc:
             raise HouseholdEventRepositoryError(
                 f"household event already exists: {event.event_id}"
             ) from exc
-        except OSError as exc:
+        except (OSError, BatchJournalError) as exc:
             raise HouseholdEventRepositoryError(
                 f"cannot persist household event: {event.event_id}"
             ) from exc
@@ -402,7 +449,12 @@ class FileHouseholdEventRepository:
                     f"stored household event must not be a symbolic link: {event_id}"
                 )
             if not target.exists():
-                return None
+                try:
+                    return self._batch_journal.get(event_id)
+                except BatchJournalError as exc:
+                    raise HouseholdEventCorruptionError(
+                        "committed household batch is malformed"
+                    ) from exc
             if not target.is_file():
                 raise HouseholdEventCorruptionError(
                     f"stored household event is not a regular file: {event_id}"
@@ -462,6 +514,12 @@ class FileHouseholdEventRepository:
             event = self.get(event_id)
             if event is not None:
                 events.append(event)
+        try:
+            events.extend(self._batch_journal.events())
+        except BatchJournalError as exc:
+            raise HouseholdEventCorruptionError(
+                "cannot enumerate valid committed household batches"
+            ) from exc
         events.sort(key=lambda event: (event.recorded_at, event.event_id.value))
         return HouseholdHistory(tuple(events))
 
@@ -490,4 +548,10 @@ class FileHouseholdEventRepository:
                 raise HouseholdEventRepositoryError(
                     f"cannot delete household event during reset: {path.name}"
                 ) from exc
+        try:
+            deleted += self._batch_journal.clear()
+        except BatchJournalError as exc:
+            raise HouseholdEventRepositoryError(
+                "cannot clear committed household batch journal"
+            ) from exc
         return deleted

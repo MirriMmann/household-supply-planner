@@ -48,6 +48,89 @@
         <button class="secondary-button" id="start-home-setup" type="button">Отметить запасы</button>
       </div>
 
+      <details class="secondary-operation shopping-readiness-panel" id="shopping-readiness-panel">
+        <summary>Общий список потребностей — блюда и весовые товары</summary>
+        <p>Показывает все ингредиенты, включая товары без подтверждённых правил продажи. Неизвестный остаток не считается нулём, а просмотр не сохраняет закупку.</p>
+        <div class="shopping-readiness-inputs">
+          <label for="shopping-recipe-select">Выбранное блюдо</label>
+          <select id="shopping-recipe-select"></select>
+          <button type="button" id="preview-shopping-recipe" class="secondary-button">Проверить ингредиенты блюда</button>
+          <label for="shopping-weight-select">Или отдельный весовой товар</label>
+          <select id="shopping-weight-select"></select>
+          <label for="shopping-weight-amount">Требуемая масса (кг)</label>
+          <input id="shopping-weight-amount" type="text" inputmode="decimal" value="0,5"/>
+          <button type="button" id="preview-shopping-weight" class="secondary-button">Проверить в общем списке</button>
+        </div>
+        <p id="shopping-readiness-status" aria-live="polite"></p>
+        <div id="shopping-readiness-result" class="shopping-readiness-result"></div>
+        <p class="human-note">Если среди недостающих товаров есть весовые позиции без подтверждённого шага продажи, полноценный план заблокирован. Для фасованных товаров используйте обычный расчёт ниже.</p>
+        <button id="shopping-to-mixed-recipe" class="secondary-button" type="button" hidden>Продолжить с выбранным блюдом в закрытом пилоте</button>
+      </details>
+
+      <details class="secondary-operation mixed-shopping-panel" id="mixed-shopping-panel" hidden>
+        <summary>Единая закупка: рецепты, упаковки и вес — закрытый пилот</summary>
+        <p class="human-note">Создание плана доступно только при отдельно проверенных правилах продажи весовых товаров. Публичная цена Globus за кг сама по себе недостаточна. Это список будущей покупки, не заказ у магазина.</p>
+        <form id="mixed-shopping-form" class="mixed-shopping-fields">
+          <fieldset class="mixed-shopping-source">
+            <legend>Что требуется купить?</legend>
+            <label><input type="radio" name="mixed-shopping-source" value="recipe" checked> Ингредиенты блюда</label>
+            <label><input type="radio" name="mixed-shopping-source" value="manual"> Мой набор продуктов</label>
+          </fieldset>
+          <div id="mixed-shopping-recipe-input">
+            <label for="mixed-shopping-recipe">Блюдо</label>
+            <select id="mixed-shopping-recipe"></select>
+          </div>
+          <div id="mixed-shopping-manual-input" hidden>
+            <div id="mixed-shopping-demands" class="mixed-shopping-demands"></div>
+            <button class="secondary-button" type="button" id="mixed-shopping-add-item">Добавить продукт</button>
+          </div>
+          <label for="mixed-shopping-budget">Максимальный бюджет на товары (сом), без неизвестной доставки</label>
+          <input id="mixed-shopping-budget" type="text" inputmode="decimal" value="1000" required>
+          <button class="secondary-button" type="submit" id="mixed-shopping-preview">Рассчитать весь смешанный план</button>
+        </form>
+        <p id="mixed-shopping-status" aria-live="polite"></p>
+        <div id="mixed-shopping-result" hidden>
+          <div id="mixed-shopping-lines"></div>
+          <label class="mixed-shopping-consent">
+            <input id="mixed-shopping-consent" type="checkbox">
+            <span>Я проверил весь состав и бюджет. Сохранить план покупок без оформления заказа и без изменения домашних запасов.</span>
+          </label>
+          <button id="mixed-shopping-save" type="button" class="primary-button" disabled>Сохранить смешанный план</button>
+        </div>
+        <div id="mixed-shopping-saved" hidden>
+          <p id="mixed-shopping-saved-info"></p>
+          <button class="secondary-button" type="button" id="mixed-shopping-open-receipt">После покупки сверить фактический чек</button>
+        </div>
+        <form id="mixed-shopping-lookup-form" class="mixed-shopping-fields">
+          <label for="mixed-shopping-lookup-id">Уже сохраняли смешанный план? Откройте его по ID</label>
+          <input id="mixed-shopping-lookup-id" type="text" maxlength="80" autocomplete="off" placeholder="mp-...">
+          <button class="secondary-button" type="submit" id="mixed-shopping-lookup">Открыть сохранённый план</button>
+        </form>
+        <p class="human-note">Изменение бюджета или ингредиентов после расчёта отменяет подтверждение. Записать покупку в домашние запасы можно только после отдельной сверки фактического чека.</p>
+      </details>
+
+      <details class="secondary-operation recipes-panel" id="recipes-panel">
+        <summary>Что приготовить из того, что есть дома?</summary>
+        <p>Рецепты опираются на последние записанные остатки. Если продукт давно не проверяли, уточните количество перед готовкой.</p>
+        <button class="secondary-button" type="button" id="refresh-recipes">Обновить по остаткам</button>
+        <p id="recipes-status" aria-live="polite"></p>
+        <div id="recipes-list" class="recipes-list"></div>
+      </details>
+
+      <details class="secondary-operation weighted-panel hidden" id="weighted-panel">
+        <summary>Товары на вес — справочный расчёт</summary>
+        <p>Цена за килограмм не означает фиксированную упаковку. Расчёт не создаёт список покупок и не учитывает неизвестные остатки.</p>
+        <form id="weighted-estimate-form" class="weighted-form">
+          <label for="weighted-item">Товар</label>
+          <select id="weighted-item" required></select>
+          <label for="weighted-mass">Сколько нужно (кг)</label>
+          <input id="weighted-mass" type="text" inputmode="decimal" value="0,5" required />
+          <button type="submit" class="secondary-button" id="weighted-estimate-button">Узнать справочную стоимость</button>
+        </form>
+        <p id="weighted-estimate-result" aria-live="polite"></p>
+        <p class="human-note">Без подтверждённых правил минимального веса и шага продажи позицию нельзя сохранить как закупку.</p>
+      </details>
+
       <details class="secondary-operation usual-basket-panel hidden" id="usual-basket-panel">
         <summary>Моя обычная закупка</summary>
         <p>Выберите привычные товары. Если истории расхода пока нет, можно явно указать резервное количество на эту закупку.</p>
@@ -56,9 +139,10 @@
         <div class="usual-basket-actions">
           <button type="button" class="secondary-button" id="save-usual-basket">Сохранить привычные товары</button>
           <button type="button" class="primary-button" id="preview-usual-basket">Предварительный план</button>
+          <button type="button" class="secondary-button hidden" id="repeat-usual-basket">Повторить привычную закупку</button>
         </div>
         <div id="usual-basket-preview" class="usual-basket-preview hidden" aria-live="polite"></div>
-        <p class="human-note">Предпросмотр не создаёт покупки и не меняет остатки. Бюджет и период берутся из формы ниже.</p>
+        <p class="human-note">«Повторить» использует только бюджет и срок последнего подтверждённого привычного плана. Остатки, потребности и цены рассчитываются заново. Предпросмотр не создаёт покупки.</p>
       </details>
 
       <section class="primary-card planner-card">
@@ -235,6 +319,56 @@
         <p>Здесь можно посмотреть прошлые списки и последние изменения запасов.</p>
       </div>
 
+      <details class="secondary-operation mixed-receipt-panel" id="mixed-receipt-review-panel" hidden>
+        <summary>Сверить фактический чек — закрытый пилот</summary>
+        <p class="human-note">Доступно только в отдельно подключённом пилоте. Чек вводится вручную; приложение не оформляет покупку в Globus и не проверяет подлинность кассового документа.</p>
+        <form id="mixed-receipt-lookup-form" class="mixed-receipt-fields">
+          <label for="mixed-receipt-plan-id">ID ранее сохранённого смешанного плана</label>
+          <input id="mixed-receipt-plan-id" type="text" autocomplete="off" maxlength="80" placeholder="mp-..." required>
+          <button id="mixed-receipt-load" type="submit" class="secondary-button">Открыть план и статус чека</button>
+        </form>
+        <p id="mixed-receipt-status" aria-live="polite"></p>
+        <div id="mixed-receipt-claimed" hidden>
+          <div id="mixed-receipt-claimed-details"></div>
+          <label class="mixed-receipt-consent" id="mixed-receipt-retry-label" hidden>
+            <input id="mixed-receipt-retry-consent" type="checkbox">
+            <span>Я хочу повторить публикацию этого же уже сохранённого чека без изменения суммы и количества.</span>
+          </label>
+          <button id="mixed-receipt-retry" class="secondary-button" type="button" hidden disabled>Восстановить учёт по сохранённому чеку</button>
+        </div>
+        <div id="mixed-receipt-editor" hidden>
+          <p id="mixed-receipt-plan-summary"></p>
+          <form id="mixed-receipt-form" class="mixed-receipt-fields">
+            <label for="mixed-receipt-ref">Номер или ссылка на фактический чек</label>
+            <input id="mixed-receipt-ref" type="text" autocomplete="off" maxlength="300" required placeholder="Чек №...">
+            <label for="mixed-receipt-time">Когда фактически получены товары</label>
+            <input id="mixed-receipt-time" type="datetime-local" step="1" required>
+            <h3>Сверка каждого товара</h3>
+            <div id="mixed-receipt-lines" class="mixed-receipt-lines"></div>
+            <label for="mixed-receipt-fees">Доставка и другие сборы (сом)</label>
+            <input id="mixed-receipt-fees" type="text" inputmode="decimal" value="0" required>
+            <label for="mixed-receipt-discount">Скидки (сом)</label>
+            <input id="mixed-receipt-discount" type="text" inputmode="decimal" value="0" required>
+            <label for="mixed-receipt-total">Итоговая сумма по чеку (сом)</label>
+            <input id="mixed-receipt-total" type="text" inputmode="decimal" required>
+            <label class="mixed-receipt-consent">
+              <input id="mixed-receipt-price-approval" type="checkbox">
+              <span>Я отдельно подтверждаю увеличение цен или платные услуги сверх предварительного расчёта (но не превышение бюджета).</span>
+            </label>
+            <button id="mixed-receipt-preview" class="secondary-button" type="submit">Проверить чек без записи запасов</button>
+          </form>
+          <section id="mixed-receipt-reviewed" hidden>
+            <h3>Проверка перед записью</h3>
+            <div id="mixed-receipt-reviewed-details"></div>
+            <label class="mixed-receipt-consent">
+              <input id="mixed-receipt-final-consent" type="checkbox">
+              <span>Я сверил чек и получил указанные товары. Подтверждаю запись фактических количеств в домашние запасы.</span>
+            </label>
+            <button id="mixed-receipt-confirm" class="primary-button" type="button" disabled>Подтвердить получение и обновить запасы</button>
+          </section>
+        </div>
+      </details>
+
       <div class="history-grid">
         <section class="primary-card">
           <div class="simple-heading">
@@ -285,6 +419,8 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/mixed_receipt_review.js" defer></script>
+  <script src="/assets/mixed_shopping_workflow.js" defer></script>
   <script src="/assets/reset.js" defer></script>
 </body>
 </html>

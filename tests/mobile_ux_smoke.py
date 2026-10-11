@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from selenium import webdriver
@@ -82,6 +82,49 @@ def demo():
                 else:
                     raise RuntimeError(f"Demo server did not start; see {log_path}")
                 yield base
+            finally:
+                server.terminate()
+                try:
+                    server.wait(timeout=6)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.wait(timeout=6)
+
+
+@contextmanager
+def private_receipt_review_demo():
+    """Synthetic sale rules only; opt-in API never enabled in production demo."""
+    with tempfile.TemporaryDirectory(prefix="m1218-receipt-review-") as folder:
+        port = free_port()
+        base = f"http://127.0.0.1:{port}"
+        log_path = ARTIFACTS / f"receipt-review-server-{port}.log"
+        with log_path.open("wb") as log:
+            server = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tests" / "mixed_receipt_review_pilot_server.py"),
+                    "--port", str(port), "--data-dir", folder,
+                ],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+            )
+            try:
+                for _ in range(100):
+                    if server.poll() is not None:
+                        raise RuntimeError(
+                            f"Receipt review pilot stopped; see {log_path}\n"
+                            + log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+                        )
+                    try:
+                        api(base, "/catalog")
+                        break
+                    except (URLError, TimeoutError, ConnectionError):
+                        time.sleep(0.1)
+                else:
+                    raise RuntimeError(f"Receipt review pilot did not start; see {log_path}")
+                plan_id = (Path(folder) / "pilot-plan-id.txt").read_text(
+                    encoding="ascii"
+                )
+                yield base, plan_id
             finally:
                 server.terminate()
                 try:
@@ -472,7 +515,488 @@ def routine_stand_preview(browser) -> None:
         screenshot(browser, "13-usual-basket-reloaded")
         assert len(api(base, "/plans?limit=12")["plans"]) == 1
         assert api(base, "/household/history")["event_count"] == 0
-        print("PASS usual basket: save, preview, explicit confirmation, reload, no silent purchases", flush=True)
+
+        # The next shop should reuse budget/horizon, but NOT replay the old stock.
+        settings = api(base, "/household/usual-basket/last-settings")["repeat_settings"]
+        assert settings["budget"] == {"amount": "500", "currency": "KGS"}
+        assert settings["horizon_days"] == "7"
+        assert settings["source_plan_id"] == api(base, "/plans?limit=12")["plans"][0]["plan_id"]
+        corrected = api(base, "/household/stocktakes", {
+            "event_id": "repeat-updated-milk-stock",
+            "item_id": "milk",
+            "quantity": {"amount": "2", "unit": "l"},
+            "reason": "updated before second weekly shop",
+        })
+        assert corrected["event"]["event_id"] == "repeat-updated-milk-stock"
+        budget = browser.find_element(By.ID, "plan-budget")
+        budget.clear()
+        budget.send_keys("900")
+        # Stored Decimal horizons must be accepted exactly, never rounded.
+        assert browser.execute_script(
+            "return [parseConfirmedHorizonDays('7.0'), "
+            "parseConfirmedHorizonDays('1E+1'), "
+            "parseConfirmedHorizonDays('7.5')];"
+        ) == [7, 10, None]
+
+        repeat = browser.find_element(By.ID, "repeat-usual-basket")
+        wait.until(lambda d: repeat.is_displayed() and repeat.is_enabled())
+        assert "500 KGS" in repeat.text
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            repeat,
+        )
+        wait.until(lambda d: d.execute_script(
+            """const b=arguments[0].getBoundingClientRect();
+               const x=b.left+b.width/2, y=b.top+b.height/2;
+               return y>=0 && y<window.innerHeight-90 &&
+                 document.elementFromPoint(x,y)===arguments[0];""", repeat
+        ))
+        repeat.click()
+        wait.until(lambda d: "Ожидаемые расходы" in d.find_element(
+            By.ID, "usual-basket-preview"
+        ).text)
+        assert browser.find_element(By.ID, "plan-budget").get_attribute("value") == "500"
+        assert browser.find_element(By.ID, "plan-horizon").get_attribute("value") == "7"
+        assert browser.find_element(By.ID, "confirm-usual-basket").is_displayed()
+        assert len(api(base, "/plans?limit=12")["plans"]) == 1
+        assert api(base, "/household/history")["event_count"] == 1
+        viewport_check(browser, "repeat usual basket")
+        screenshot(browser, "15-usual-basket-repeat-with-updated-stock")
+        print(
+            "PASS usual basket: save, confirm, reload, one-tap repeat, "
+            "fresh stock without silent writes",
+            flush=True,
+        )
+
+
+def recipes_from_home(browser) -> None:
+    """Unknown inventory, followed by observed shortfall and full-package quote."""
+    with demo() as base:
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+        panel = browser.find_element(By.ID, "recipes-panel")
+        summary = panel.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        summary.click()
+        wait.until(lambda d: d.find_elements(By.CSS_SELECTOR, "#recipes-list .recipe-card"))
+        first = browser.find_element(By.CSS_SELECTOR, "#recipes-list .recipe-card")
+        assert "Нужно уточнить остатки" in first.text
+        screenshot(browser, "16-recipes-unknown-stock")
+        assert api(base, "/plans?limit=12")["plans"] == []
+
+        api(base, "/household/stocktakes", {
+            "event_id": "recipe-mobile-rice",
+            "item_id": "rice",
+            "quantity": {"amount": "1", "unit": "kg"},
+            "reason": "fresh kitchen count",
+        })
+        api(base, "/household/stocktakes", {
+            "event_id": "recipe-mobile-milk",
+            "item_id": "milk",
+            "quantity": {"amount": "100", "unit": "ml"},
+            "reason": "fresh kitchen count",
+        })
+        refresh = browser.find_element(By.ID, "refresh-recipes")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            refresh,
+        )
+        refresh.click()
+        wait.until(lambda d: "Докупить: 1 поз." in d.find_element(
+            By.ID, "recipes-list"
+        ).text)
+        first = browser.find_element(By.CSS_SELECTOR, "#recipes-list .recipe-card")
+        summary = first.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        summary.click()
+        quote = first.find_element(By.CSS_SELECTOR, ".recipe-actions button")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            quote,
+        )
+        quote.click()
+        wait.until(lambda d: "120 сом" in d.find_element(
+            By.CSS_SELECTOR, "#recipes-list .recipe-quote"
+        ).text)
+        assert "предпросмотр" in browser.find_element(
+            By.CSS_SELECTOR, "#recipes-list .recipe-quote"
+        ).text
+        assert api(base, "/plans?limit=12")["plans"] == []
+        assert api(base, "/household/history")["event_count"] == 2
+        viewport_check(browser, "cook-from-home quote")
+        screenshot(browser, "17-recipes-price-quote-no-purchase")
+
+        # The displayed recipe shortage plan is saved only after a separate tap.
+        save = first.find_element(By.CSS_SELECTOR, ".recipe-actions .primary-button")
+        assert save.is_displayed() and save.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            save,
+        )
+        save.click()
+        wait.until(lambda d: len(api(base, "/plans?limit=12")["plans"]) == 1)
+        saved_id = api(base, "/plans?limit=12")["plans"][0]["plan_id"]
+        saved_plan = api(base, f"/plans/{saved_id}")
+        assert saved_plan["request"]["decision_basis"]["kind"] == "recipe"
+        assert saved_plan["request"]["decision_basis"]["recipe_id"] == "milk-rice"
+        assert api(base, "/household/history")["event_count"] == 2
+        # Server persistence precedes the async browser refresh/render step.
+        wait.until(lambda d: d.find_element(By.ID, "plan-result-panel").is_displayed())
+        viewport_check(browser, "cook-from-home confirmed plan")
+        screenshot(browser, "18-recipes-confirmed-plan-no-purchase")
+        print(
+            "PASS recipes: unknown stock, package quote, explicit saved plan, no purchase",
+            flush=True,
+        )
+
+
+def shared_weighted_shopping_readiness(browser) -> None:
+    """All seven ingredients visible while unavailable weight purchases stay blocked."""
+    with demo() as base:
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+
+        panel = browser.find_element(By.ID, "shopping-readiness-panel")
+        summary = panel.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        summary.click()
+        recipe = browser.find_element(By.ID, "shopping-recipe-select")
+        wait.until(lambda d: len(Select(d.find_element(
+            By.ID, "shopping-recipe-select"
+        )).options) == 5)
+        Select(recipe).select_by_value("kg-kuurdak-beef")
+        button = browser.find_element(By.ID, "preview-shopping-recipe")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            button,
+        )
+        button.click()
+        wait.until(lambda d: len(d.find_elements(
+            By.CSS_SELECTOR, "#shopping-readiness-result li"
+        )) == 7)
+        text = browser.find_element(By.ID, "shopping-readiness-result").text
+        assert "Лук" in text and "Говядина" in text
+        assert "остаток неизвестен" in text
+        assert api(base, "/plans?limit=12")["plans"] == []
+        assert api(base, "/household/history")["event_count"] == 0
+        assert browser.find_element(
+            By.ID, "mixed-shopping-panel"
+        ).get_attribute("hidden")
+        assert browser.find_element(
+            By.ID, "shopping-to-mixed-recipe"
+        ).get_attribute("hidden")
+        try:
+            api(base, "/mixed/plans/preview", {
+                "budget": {"amount": "110", "currency": "KGS"},
+                "demands": [
+                    {"item_id": "onion", "quantity": {"amount": "350", "unit": "g"}},
+                ],
+            })
+        except HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("untrusted offline mode exposed mixed planning")
+        screenshot(browser, "19-shared-kyrgyz-shopping-unknown-weight")
+
+        Select(browser.find_element(By.ID, "shopping-weight-select")).select_by_value("onion")
+        field = browser.find_element(By.ID, "shopping-weight-amount")
+        field.clear()
+        field.send_keys("0,5")
+        weight_button = browser.find_element(By.ID, "preview-shopping-weight")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            weight_button,
+        )
+        weight_button.click()
+        wait.until(lambda d: len(d.find_elements(
+            By.CSS_SELECTOR, "#shopping-readiness-result li"
+        )) == 1)
+        assert "500 г" in browser.find_element(
+            By.ID, "shopping-readiness-result"
+        ).text
+        assert api(base, "/plans?limit=12")["plans"] == []
+        assert api(base, "/household/history")["event_count"] == 0
+        # The atomic receipt-publishing pathway is private and must never be
+        # reachable from the ordinary offline home/mobile product assembly.
+        try:
+            api(base, "/mixed/plans/mp-test-atomic/receipt", {"receipt_ref": "forbidden"})
+        except HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("mixed receipt API exposed without authorized pilot")
+        viewport_check(browser, "shared shopping weight review")
+        screenshot(browser, "20-shared-weight-shopping-readonly")
+        print(
+            "PASS shared shopping: full recipes + weight needs, no fake plans",
+            flush=True,
+        )
+
+
+def mixed_receipt_review_mobile(browser) -> None:
+    """Review must be read-only; only a second explicit tap posts all Items."""
+    with private_receipt_review_demo() as (base, plan_id):
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(
+            By.CSS_SELECTOR, "#connection-status.online"
+        ))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+
+        # M12.19: derive and save a new mixed plan through the actual UI,
+        # rather than injecting a previously saved fixture PlanId.
+        mixed_panel = browser.find_element(By.ID, "mixed-shopping-panel")
+        wait.until(lambda d: not mixed_panel.get_attribute("hidden"))
+        transfer = browser.find_element(By.ID, "shopping-to-mixed-recipe")
+        assert not transfer.get_attribute("hidden")
+        readiness = browser.find_element(By.ID, "shopping-readiness-panel")
+        readiness_summary = readiness.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            readiness_summary,
+        )
+        readiness_summary.click()
+        Select(browser.find_element(By.ID, "shopping-recipe-select")).select_by_value(
+            "kg-kuurdak-beef"
+        )
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            transfer,
+        )
+        transfer.click()
+        assert mixed_panel.get_attribute("open") is not None
+        assert browser.find_element(By.ID, "mixed-shopping-recipe").get_attribute("value") == "kg-kuurdak-beef"
+        # Unknown pantry inventory must block the entire traditional recipe,
+        # rather than producing an incomplete basket of only known SKU lines.
+        blocked_quote = browser.find_element(By.ID, "mixed-shopping-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            blocked_quote,
+        )
+        blocked_quote.click()
+        wait.until(lambda d: "Неполный список не сохраняется" in d.find_element(
+            By.ID, "mixed-shopping-status"
+        ).text)
+        assert browser.find_element(By.ID, "mixed-shopping-result").get_attribute("hidden")
+        assert api(base, "/household/history")["event_count"] == 2
+
+        manual = browser.find_element(
+            By.CSS_SELECTOR, '#mixed-shopping-panel input[value="manual"]'
+        )
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            manual,
+        )
+        manual.click()
+        rows = browser.find_elements(By.CSS_SELECTOR, ".mixed-shopping-demand-row")
+        assert len(rows) == 1
+        Select(rows[0].find_element(By.TAG_NAME, "select")).select_by_value("onion")
+        onion_amount = rows[0].find_element(By.TAG_NAME, "input")
+        onion_amount.clear()
+        onion_amount.send_keys("0.35")
+        Select(rows[0].find_elements(By.TAG_NAME, "select")[1]).select_by_value("kg")
+        add_item = browser.find_element(By.ID, "mixed-shopping-add-item")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            add_item,
+        )
+        add_item.click()
+        rows = browser.find_elements(By.CSS_SELECTOR, ".mixed-shopping-demand-row")
+        assert len(rows) == 2
+        Select(rows[1].find_element(By.TAG_NAME, "select")).select_by_value("rice")
+        rice_amount = rows[1].find_element(By.TAG_NAME, "input")
+        rice_amount.clear()
+        rice_amount.send_keys("0.2")
+        Select(rows[1].find_elements(By.TAG_NAME, "select")[1]).select_by_value("kg")
+        budget = browser.find_element(By.ID, "mixed-shopping-budget")
+        budget.clear()
+        budget.send_keys("110")
+        plan_preview = browser.find_element(By.ID, "mixed-shopping-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            plan_preview,
+        )
+        plan_preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-result"
+        ).get_attribute("hidden"))
+        assert "110" in browser.find_element(By.ID, "mixed-shopping-lines").text
+        assert api(base, "/household/history")["event_count"] == 2
+        viewport_check(browser, "private mixed shopping preview")
+        save_plan = browser.find_element(By.ID, "mixed-shopping-save")
+        assert not save_plan.is_enabled()
+        screenshot(browser, "21-mixed-shopping-preview-no-inventory")
+
+        # Changing an assumption invalidates the approval and requires
+        # another full market/pricing review, even after restoring the value.
+        budget.clear()
+        budget.send_keys("111")
+        assert browser.find_element(By.ID, "mixed-shopping-result").get_attribute("hidden")
+        assert not save_plan.is_enabled()
+        budget.clear()
+        budget.send_keys("110")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            plan_preview,
+        )
+        plan_preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-result"
+        ).get_attribute("hidden"))
+        consent_plan = browser.find_element(By.ID, "mixed-shopping-consent")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            consent_plan,
+        )
+        consent_plan.click()
+        assert save_plan.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            save_plan,
+        )
+        save_plan.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-saved"
+        ).get_attribute("hidden"))
+        saved_text = browser.find_element(By.ID, "mixed-shopping-saved-info").text
+        import re
+        matched = re.search(r"mp-[0-9a-f]{32}", saved_text)
+        assert matched is not None, saved_text
+        plan_id = matched.group()
+        assert api(base, f"/mixed/plans/{plan_id}")["plan"]["plan_id"] == plan_id
+        assert api(base, "/household/history")["event_count"] == 2
+
+        handoff = browser.find_element(By.ID, "mixed-shopping-open-receipt")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            handoff,
+        )
+        handoff.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-editor"
+        ).get_attribute("hidden"))
+        assert browser.find_element(By.ID, "mixed-receipt-plan-id").get_attribute("value") == plan_id
+        assert browser.find_element(By.CSS_SELECTOR, '[data-view="history"]').get_attribute("class").find("active") >= 0
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "not_received"
+        assert api(base, "/household/history")["event_count"] == 2
+
+        # Simulate actual delivery of 290g against a planned 300g.
+        mass = browser.find_element(By.CSS_SELECTOR, '[id^="mixed-mass-"]')
+        mass.clear()
+        mass.send_keys("290")
+        prices = browser.find_elements(By.CSS_SELECTOR, '[id^="mixed-paid-"]')
+        assert len(prices) == 2
+        for paid in prices:
+            if paid.get_attribute("id").endswith("-0"):
+                # Sorted by Item ID: onion first; its 300g reference is 15 som.
+                paid.clear()
+                paid.send_keys("14.5")
+        ref = browser.find_element(By.ID, "mixed-receipt-ref")
+        ref.send_keys("operator-mobile-receipt-001")
+        fees = browser.find_element(By.ID, "mixed-receipt-fees")
+        fees.clear()
+        fees.send_keys("0.5")
+        approval = browser.find_element(By.ID, "mixed-receipt-price-approval")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            approval,
+        )
+        approval.click()
+
+        preview = browser.find_element(By.ID, "mixed-receipt-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview,
+        )
+        preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-reviewed"
+        ).get_attribute("hidden"))
+        assert "10 g" in browser.find_element(
+            By.ID, "mixed-receipt-reviewed-details"
+        ).text
+        assert api(base, "/household/history")["event_count"] == 2
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "not_received"
+        confirm = browser.find_element(By.ID, "mixed-receipt-confirm")
+        assert not confirm.is_enabled()
+        viewport_check(browser, "private receipt review before purchase")
+        screenshot(browser, "21-mixed-receipt-validated-uncommitted")
+
+        # Any edit after server review must invalidate authorization, even if
+        # the operator subsequently restores the original receipt value.
+        reference = browser.find_element(By.ID, "mixed-receipt-ref")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reference,
+        )
+        reference.send_keys("-draft-change")
+        assert browser.find_element(By.ID, "mixed-receipt-reviewed").get_attribute("hidden")
+        assert not confirm.is_enabled()
+        reference.clear()
+        reference.send_keys("operator-mobile-receipt-001")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview,
+        )
+        preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-reviewed"
+        ).get_attribute("hidden"))
+        assert not confirm.is_enabled()
+        assert api(base, "/household/history")["event_count"] == 2
+
+        consent = browser.find_element(By.ID, "mixed-receipt-final-consent")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            consent,
+        )
+        consent.click()
+        assert confirm.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            confirm,
+        )
+        confirm.click()
+        wait.until(lambda d: "уже обработан" in d.find_element(
+            By.ID, "mixed-receipt-claimed-details"
+        ).text)
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "completed"
+        assert api(base, "/household/history")["event_count"] == 4
+        assert browser.find_element(By.ID, "mixed-receipt-editor").get_attribute("hidden")
+        assert browser.find_element(By.ID, "mixed-receipt-retry").get_attribute("hidden")
+
+        # Reentry must not generate a second purchase.
+        reload_button = browser.find_element(By.ID, "mixed-receipt-load")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reload_button,
+        )
+        reload_button.click()
+        wait.until(lambda d: "уже обработан" in d.find_element(
+            By.ID, "mixed-receipt-claimed-details"
+        ).text)
+        assert api(base, "/household/history")["event_count"] == 4
+        viewport_check(browser, "private mixed receipt committed")
+        screenshot(browser, "22-mixed-receipt-committed-atomic")
+        print("PASS receipt review: 2 steps, actual mass, one atomic purchase", flush=True)
 
 
 def main() -> None:
@@ -481,6 +1005,9 @@ def main() -> None:
         first_batch(browser)
         reminder_reentry(browser)
         routine_stand_preview(browser)
+        recipes_from_home(browser)
+        shared_weighted_shopping_readiness(browser)
+        mixed_receipt_review_mobile(browser)
     print("MOBILE_UX_SMOKE_OK", flush=True)
 
 

@@ -123,6 +123,12 @@ _ASSETS = {
     "/assets/reset.js": _StaticAsset(
         "reset.js", b"text/javascript; charset=utf-8", b"no-cache"
     ),
+    "/assets/mixed_receipt_review.js": _StaticAsset(
+        "mixed_receipt_review.js", b"text/javascript; charset=utf-8", b"no-cache"
+    ),
+    "/assets/mixed_shopping_workflow.js": _StaticAsset(
+        "mixed_shopping_workflow.js", b"text/javascript; charset=utf-8", b"no-cache"
+    ),
     "/assets/styles.css": _StaticAsset(
         "styles.css", b"text/css; charset=utf-8", b"no-cache"
     ),

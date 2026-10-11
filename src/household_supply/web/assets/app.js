@@ -22,6 +22,15 @@ const state = {
   usualBasketSaving: false,
   usualBasketPreviewId: null,
   usualBasketPreviewRevision: 0,
+  recipes: [],
+  recipeQuoteRevision: 0,
+  weightCandidates: [],
+  weightEstimateRevision: 0,
+  weightEstimateSupported: false,
+  shoppingRecipeCandidates: [],
+  shoppingReviewRevision: 0,
+  usualBasketRepeatSettings: null,
+  usualBasketRepeating: false,
 };
 
 class ApiError extends Error {
@@ -1645,6 +1654,16 @@ function renderUsualBasket() {
   byId("save-usual-basket").disabled = state.usualBasketSaving || !state.usualBasketDirty;
   byId("preview-usual-basket").disabled =
     state.usualBasketSaving || state.usualBasketDirty || state.usualBasketDraft.size === 0;
+  const repeat = byId("repeat-usual-basket");
+  repeat.classList.toggle("hidden", !state.usualBasketRepeatSettings);
+  repeat.disabled =
+    state.usualBasketSaving || state.usualBasketRepeating
+    || state.usualBasketDirty || state.usualBasketDraft.size === 0;
+  if (state.usualBasketRepeatSettings) {
+    const settings = state.usualBasketRepeatSettings;
+    repeat.textContent =
+      `Повторить: ${settings.budget.amount} ${settings.budget.currency}, ${settings.horizon_days} дн.`;
+  }
 }
 
 async function loadUsualBasket() {
@@ -1657,11 +1676,83 @@ async function loadUsualBasket() {
     state.usualBasketSkuChoices.clear();
     state.usualBasketDirty = false;
     invalidateUsualBasketPreview();
+    await loadRepeatSettings();
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     state.usualBasketAvailable = false;
   }
   renderUsualBasket();
+}
+
+
+async function loadRepeatSettings() {
+  const result = await request("/household/usual-basket/last-settings");
+  state.usualBasketRepeatSettings = result.repeat_settings;
+  renderUsualBasket();
+}
+
+function parseConfirmedHorizonDays(value) {
+  // The domain accepts Decimal("7.0") and Decimal("1E+1"), while the stand
+  // selects integral days. Normalize exactly, not via floating point rounding.
+  const raw = String(value).trim();
+  const parsed = /^\+?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?$/.exec(raw);
+  if (!parsed || raw.length > 64) return null;
+  const exponentText = raw.match(/[eE]([+-]?\d+)$/)?.[1] || "0";
+  const exponent = Number(exponentText);
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 30) return null;
+  return parseHorizonDays(decimalText(raw));
+}
+
+function applyPreviousRoutineInputs(settings) {
+  // These are solely user-approved planning inputs. Neither previous SKUs nor
+  // quantities, prices, household state or market observations are replayed.
+  const days = parseConfirmedHorizonDays(settings.horizon_days);
+  const amount = normalizeNumberInput(String(settings.budget.amount));
+  const currency = byId("plan-currency");
+  // The current stand intentionally fixes currency to KGS in a hidden input.
+  // Refuse a historic currency the stand cannot display or plan in.
+  if (days === null || !amount || settings.budget.currency !== currency.value) {
+    throw new Error("Прошлые настройки больше не поддерживаются этой формой.");
+  }
+  byId("plan-budget").value = amount;
+  const preset = [...document.querySelectorAll("[data-days]")].find(
+    (button) => Number(button.dataset.days) === days
+  );
+  if (preset) {
+    setHorizonPreset(preset);
+  } else {
+    byId("custom-horizon-days").value = String(days);
+    updateCustomHorizon();
+    byId("custom-horizon-field").classList.remove("hidden");
+    byId("custom-horizon-toggle").setAttribute("aria-expanded", "true");
+  }
+  invalidateUsualBasketPreview();
+}
+
+async function repeatUsualBasket() {
+  if (state.usualBasketRepeating || state.usualBasketDirty || !state.usualBasketDraft.size) {
+    return;
+  }
+  state.usualBasketRepeating = true;
+  const revision = state.usualBasketPreviewRevision;
+  renderUsualBasket();
+  try {
+    // Read the current last confirmed plan, not a stale browser-side copy.
+    const current = await request("/household/usual-basket/last-settings");
+    if (revision !== state.usualBasketPreviewRevision || state.usualBasketDirty) return;
+    state.usualBasketRepeatSettings = current.repeat_settings;
+    if (!current.repeat_settings) {
+      showToast("Сначала подтвердите хотя бы одну привычную закупку.", true);
+      return;
+    }
+    applyPreviousRoutineInputs(current.repeat_settings);
+    await previewUsualBasket();
+  } catch (error) {
+    showToast(friendlyError(error), true);
+  } finally {
+    state.usualBasketRepeating = false;
+    renderUsualBasket();
+  }
 }
 
 async function saveUsualBasket() {
@@ -1769,6 +1860,7 @@ async function previewUsualBasket() {
           state.usualBasketPreviewId = null;
           renderPlan(saved.plan);
           await refreshOperationalState();
+          await loadRepeatSettings();
           panel.replaceChildren();
           const note = document.createElement("p");
           note.textContent = "Список сохранён. Покупки пока не совершены: отмечайте и подтверждайте их отдельно.";
@@ -1801,6 +1893,366 @@ async function previewUsualBasket() {
   }
 }
 
+// Recipe assessments and quotations never mutate household facts. A recipe
+// plan becomes durable only after a separate explicit confirmation.
+function recipeStatusText(recipe) {
+  if (recipe.status === "covered") return "По учёту всё есть";
+  if (recipe.status === "short") return `Докупить: ${recipe.missing_count} поз.`;
+  return "Нужно уточнить остатки";
+}
+
+function invalidateRecipeQuotes() {
+  state.recipeQuoteRevision += 1;
+  renderRecipeList();
+}
+
+function renderRecipeList() {
+  const list = byId("recipes-list");
+  list.replaceChildren();
+  const recipes = state.recipes;
+  byId("recipes-status").textContent = recipes.length
+    ? `Подобрано рецептов из каталога: ${recipes.length}. Это ориентир по учёту, не проверка продуктов в холодильнике.`
+    : "В текущем каталоге нет рецептов с полным набором известных ингредиентов.";
+  for (const recipe of recipes) {
+    const card = document.createElement("details");
+    card.className = "recipe-card";
+    const summary = document.createElement("summary");
+    summary.textContent = `${recipe.name} · ${recipeStatusText(recipe)}`;
+    const meta = document.createElement("p");
+    meta.className = "recipe-meta";
+    meta.textContent = `${recipe.cuisine} · ${recipe.category} · ${recipe.servings} порции`;
+    const ingredients = document.createElement("ul");
+    for (const entry of recipe.ingredients) {
+      const row = document.createElement("li");
+      const status = entry.status === "covered" ? "есть по учёту"
+        : entry.status === "short" ? `нужно ${humanQuantity(entry.missing)}`
+        : "остаток неизвестен";
+      row.textContent = `${itemName(entry.item_id)} — ${humanQuantity(entry.required)}; ${status}`;
+      ingredients.appendChild(row);
+    }
+    const steps = document.createElement("ol");
+    for (const step of recipe.steps) {
+      const row = document.createElement("li");
+      row.textContent = step;
+      steps.appendChild(row);
+    }
+    const actions = document.createElement("div");
+    actions.className = "recipe-actions";
+    const quoteButton = document.createElement("button");
+    quoteButton.type = "button";
+    quoteButton.className = "secondary-button";
+    quoteButton.textContent = "Проверить стоимость недостающего";
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "primary-button hidden";
+    confirmButton.textContent = "Сохранить список недостающих продуктов";
+    const result = document.createElement("p");
+    result.className = "recipe-quote";
+    result.setAttribute("aria-live", "polite");
+    let pendingPreviewId = null;
+    quoteButton.addEventListener("click", async () => {
+      const generation = state.recipeQuoteRevision;
+      pendingPreviewId = null;
+      confirmButton.classList.add("hidden");
+      quoteButton.disabled = true;
+      result.textContent = "Проверяем данные…";
+      try {
+        const budget = normalizeNumberInput(byId("plan-budget").value);
+        if (!budget) throw new Error("Укажите бюджет в форме покупок.");
+        const data = await request(`/recipes/${encodeURIComponent(recipe.recipe_id)}/quote`, {
+          method: "POST",
+          body: JSON.stringify({
+            budget: {amount: budget, currency: byId("plan-currency").value},
+          }),
+        });
+        if (generation !== state.recipeQuoteRevision) return;
+        if (data.recipe.status === "unverified") {
+          result.textContent = "Не все остатки проверены. Сначала уточните домашние запасы.";
+        } else if (data.recipe.status === "covered") {
+          result.textContent = "По учёту докупать ничего не нужно (0 сом).";
+        } else if (data.plan?.status === "feasible") {
+          const lines = (data.plan.purchases || []).map(
+            (entry) => `${itemName(entry.item_id)}: ${packageText(entry.packs)}`,
+          );
+          result.textContent = `Стоимость упаковок: ${moneyText(data.estimated_purchase_cost)}. ${lines.join("; ")}. Это предпросмотр; список сохраняется отдельно, покупки пока не совершены.`;
+          if (data.preview_id) {
+            pendingPreviewId = data.preview_id;
+            confirmButton.classList.remove("hidden");
+          }
+        } else {
+          result.textContent = "При текущем бюджете или предложениях магазинов не удалось покрыть все недостающие ингредиенты.";
+        }
+      } catch (error) {
+        if (generation === state.recipeQuoteRevision) result.textContent = friendlyError(error);
+      } finally {
+        quoteButton.disabled = false;
+      }
+    });
+    confirmButton.addEventListener("click", async () => {
+      if (!pendingPreviewId || confirmButton.disabled) return;
+      const token = pendingPreviewId;
+      const generation = state.recipeQuoteRevision;
+      confirmButton.disabled = true;
+      result.textContent = "Сохраняем показанный список…";
+      try {
+        const saved = await request(`/recipes/${encodeURIComponent(recipe.recipe_id)}/confirm`, {
+          method: "POST",
+          body: JSON.stringify({preview_id: token}),
+        });
+        pendingPreviewId = null;
+        confirmButton.classList.add("hidden");
+        if (generation === state.recipeQuoteRevision) {
+          result.textContent = "Список сохранён. Запасы не изменены; покупки подтвердите отдельно.";
+        }
+        await refreshOperationalState();
+        renderPlan(saved.plan);
+        showToast("Список недостающих продуктов сохранён.");
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          pendingPreviewId = null;
+          confirmButton.classList.add("hidden");
+          result.textContent = "Остатки или время предпросмотра изменились. Рассчитайте заново.";
+        } else {
+          result.textContent = friendlyError(error);
+        }
+      } finally {
+        confirmButton.disabled = false;
+      }
+    });
+    actions.append(quoteButton, confirmButton, result);
+    card.append(summary, meta, ingredients, steps, actions);
+    if (recipe.source_url) {
+      const link = document.createElement("a");
+      link.href = recipe.source_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = `Первоисточник: ${recipe.attribution || "открыть"}`;
+      card.appendChild(link);
+    }
+    list.appendChild(card);
+  }
+}
+
+async function loadWeightCandidates() {
+  const data = await request("/catalog/weighted-candidates");
+  state.weightCandidates = data.candidates || [];
+  state.weightEstimateSupported = Boolean(data.estimate_supported);
+  window.MixedReceiptReview?.setEnabled(
+    Boolean(data.mixed_receipt_review_enabled)
+  );
+  window.MixedShoppingWorkflow?.configure({
+    catalog: state.catalog, candidates: state.weightCandidates,
+  });
+  window.MixedShoppingWorkflow?.setEnabled(
+    Boolean(data.mixed_plan_enabled && data.mixed_receipt_review_enabled)
+  );
+  const panel = byId("weighted-panel");
+  panel.classList.toggle("hidden", !data.estimate_supported || !state.weightCandidates.length);
+  const select = byId("weighted-item");
+  const shoppingSelect = byId("shopping-weight-select");
+  select.replaceChildren();
+  shoppingSelect.replaceChildren();
+  for (const candidate of state.weightCandidates) {
+    const option = document.createElement("option");
+    option.value = candidate.item_id;
+    option.textContent = candidate.item_name;
+    select.appendChild(option);
+    shoppingSelect.appendChild(option.cloneNode(true));
+  }
+  state.weightEstimateRevision += 1;
+  byId("weighted-estimate-result").textContent = "";
+}
+
+async function submitWeightEstimate(event) {
+  event.preventDefault();
+  const revision = ++state.weightEstimateRevision;
+  const result = byId("weighted-estimate-result");
+  result.replaceChildren();
+  const button = byId("weighted-estimate-button");
+  const itemId = byId("weighted-item").value;
+  const amount = normalizeNumberInput(byId("weighted-mass").value);
+  if (!/^\d+(?:\.\d+)?$/.test(amount) || !(Number(amount) > 0)) {
+    result.textContent = "Введите положительную массу в килограммах.";
+    return;
+  }
+  button.disabled = true;
+  result.textContent = "Получаем цену из Globus…";
+  try {
+    const data = await request("/catalog/weighted-candidates/estimate", {
+      method: "POST",
+      body: JSON.stringify({
+        item_id: itemId,
+        quantity: { amount, unit: "kg" },
+      }),
+    });
+    if (revision !== state.weightEstimateRevision) return;
+    if (!data.listing_available || !data.reference_unit_price) {
+      result.textContent = "В публичном каталоге товар сейчас отмечен недоступным. Стоимость неизвестна.";
+      return;
+    }
+    const requested = humanQuantity(data.requested);
+    const upper = moneyText(data.estimated_upper_bound);
+    const price = moneyText(data.reference_unit_price);
+    result.textContent = `Для ${requested} справочный расчёт: до ${upper} (цена ${price} за 1 кг). Это не подтверждённая сумма продажи и не список покупок. `;
+    const source = document.createElement("a");
+    source.href = data.source_ref;
+    source.target = "_blank";
+    source.rel = "noopener noreferrer";
+    source.textContent = "Карточка товара";
+    result.appendChild(source);
+  } catch (error) {
+    if (revision === state.weightEstimateRevision) {
+      result.textContent = friendlyError(error);
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadShoppingRecipeCandidates() {
+  const data = await request("/shopping/recipe-candidates");
+  state.shoppingRecipeCandidates = data.recipes || [];
+  window.MixedShoppingWorkflow?.setRecipes(state.shoppingRecipeCandidates);
+  const select = byId("shopping-recipe-select");
+  select.replaceChildren();
+  for (const recipe of state.shoppingRecipeCandidates) {
+    const option = document.createElement("option");
+    option.value = recipe.recipe_id;
+    option.textContent = recipe.name;
+    select.appendChild(option);
+  }
+  state.shoppingReviewRevision += 1;
+  byId("shopping-readiness-result").replaceChildren();
+  byId("shopping-readiness-status").textContent = "";
+}
+
+function renderShoppingReadiness(data) {
+  const result = byId("shopping-readiness-result");
+  result.replaceChildren();
+  const status = byId("shopping-readiness-status");
+  if (data.inventory_ready) {
+    status.textContent = "По записанным остаткам все ингредиенты уже есть дома. Покупка не требуется.";
+  } else if (data.blockers.includes("inventory_unverified")) {
+    status.textContent = "Сначала уточните неизвестные остатки. Мы не считаем их нулевыми.";
+  } else if (data.blockers.includes("weighted_sale_rule_unverified")) {
+    status.textContent = "Некоторые недостающие продукты продаются на вес. Без подтверждённых правил магазина общий план не сохраняется.";
+  } else {
+    status.textContent = "Потребности проверены по домашним записям; этот список не является подтверждённой покупкой.";
+  }
+  const list = document.createElement("ul");
+  for (const item of data.lines || []) {
+    const row = document.createElement("li");
+    const stockText = item.stock_status === "covered" ? "учтено дома"
+      : item.stock_status === "unverified" ? "остаток неизвестен"
+      : item.stock_status === "unit_conflict" ? "единица запаса несовместима"
+      : `нужно ещё ${humanQuantity(item.missing)}`;
+    const kindText = item.kind === "fixed_package" ? "фасованный товар"
+      : item.kind === "weighted_reference" ? "весовой товар (правила продажи не подтверждены)"
+      : "нет поддерживаемого SKU";
+    row.textContent = `${item.name}: ${humanQuantity(item.required)} — ${stockText}; ${kindText}`;
+    if (
+      item.kind === "weighted_reference" &&
+      item.stock_status === "short" &&
+      item.missing &&
+      state.weightEstimateSupported
+    ) {
+      const quoteButton = document.createElement("button");
+      quoteButton.type = "button";
+      quoteButton.className = "secondary-button";
+      quoteButton.textContent = "Проверить цену за вес";
+      const quoteResult = document.createElement("span");
+      quoteResult.className = "shopping-weight-price";
+      quoteButton.addEventListener("click", async () => {
+        quoteButton.disabled = true;
+        quoteResult.textContent = " Получаем свежую справочную цену…";
+        try {
+          const quoted = await request("/catalog/weighted-candidates/estimate", {
+            method: "POST",
+            body: JSON.stringify({
+              item_id: item.item_id, quantity: item.missing,
+            }),
+          });
+          if (quoted.listing_available && quoted.estimated_upper_bound) {
+            quoteResult.textContent = ` Ориентир: до ${moneyText(quoted.estimated_upper_bound)}. Покупка не подтверждена.`;
+          } else {
+            quoteResult.textContent = " Цена неизвестна или товар недоступен.";
+          }
+        } catch (error) {
+          quoteResult.textContent = ` ${friendlyError(error)}`;
+        } finally {
+          quoteButton.disabled = false;
+        }
+      });
+      row.appendChild(document.createTextNode(" "));
+      row.appendChild(quoteButton);
+      row.appendChild(quoteResult);
+    }
+    if (item.source_ref) {
+      const link = document.createElement("a");
+      link.href = item.source_ref;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = " Карточка Globus";
+      row.appendChild(link);
+    }
+    list.appendChild(row);
+  }
+  result.appendChild(list);
+  const note = document.createElement("p");
+  note.textContent = data.notice || "";
+  result.appendChild(note);
+}
+
+async function previewSharedShopping(payload) {
+  const revision = ++state.shoppingReviewRevision;
+  const status = byId("shopping-readiness-status");
+  const result = byId("shopping-readiness-result");
+  result.replaceChildren();
+  status.textContent = "Сверяем потребности с записанными запасами…";
+  const buttons = [
+    byId("preview-shopping-recipe"), byId("preview-shopping-weight"),
+  ];
+  for (const button of buttons) button.disabled = true;
+  try {
+    const data = await request("/shopping/preview", {
+      method: "POST", body: JSON.stringify(payload),
+    });
+    if (revision === state.shoppingReviewRevision) renderShoppingReadiness(data);
+  } catch (error) {
+    if (revision === state.shoppingReviewRevision) {
+      status.textContent = friendlyError(error);
+    }
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
+}
+
+async function previewSharedRecipe() {
+  const recipeId = byId("shopping-recipe-select").value;
+  if (!recipeId) return;
+  await previewSharedShopping({ recipe_id: recipeId });
+}
+
+async function previewSharedWeight() {
+  const amount = normalizeNumberInput(byId("shopping-weight-amount").value);
+  if (!/^\d+(?:\.\d+)?$/.test(amount) || !(Number(amount) > 0)) {
+    byId("shopping-readiness-status").textContent = "Введите положительную массу в килограммах.";
+    return;
+  }
+  const itemId = byId("shopping-weight-select").value;
+  if (!itemId) return;
+  await previewSharedShopping({
+    demands: [{ item_id: itemId, quantity: { amount, unit: "kg" } }],
+  });
+}
+
+async function loadRecipes() {
+  const response = await request("/recipes");
+  state.recipes = response.recipes || [];
+  state.recipeQuoteRevision += 1;
+  renderRecipeList();
+}
+
 async function refreshAll() {
   try {
     setConnection(false, "Подключаемся…");
@@ -1811,6 +2263,9 @@ async function refreshAll() {
     renderMustHaves();
     await loadUsualBasket();
     await refreshOperationalState();
+    await loadRecipes();
+    await loadWeightCandidates();
+    await loadShoppingRecipeCandidates();
     setConnection(true, "Работает");
   } catch (error) {
     setConnection(false, "Нет связи");
@@ -1823,12 +2278,40 @@ for (const button of document.querySelectorAll("[data-view]")) {
 }
 
 byId("start-home-setup").addEventListener("click", () => setView("home"));
+byId("refresh-recipes").addEventListener("click", async () => {
+  try {
+    await loadRecipes();
+  } catch (error) {
+    showToast(friendlyError(error), true);
+  }
+});
+byId("preview-shopping-recipe").addEventListener("click", previewSharedRecipe);
+byId("preview-shopping-weight").addEventListener("click", previewSharedWeight);
+for (const id of ["shopping-recipe-select", "shopping-weight-select", "shopping-weight-amount"]) {
+  byId(id).addEventListener("input", () => {
+    state.shoppingReviewRevision += 1;
+    byId("shopping-readiness-result").replaceChildren();
+    byId("shopping-readiness-status").textContent = "";
+  });
+}
+byId("weighted-estimate-form").addEventListener("submit", submitWeightEstimate);
+for (const id of ["weighted-item", "weighted-mass"]) {
+  byId(id).addEventListener("input", () => {
+    state.weightEstimateRevision += 1;
+    byId("weighted-estimate-result").textContent = "";
+  });
+}
 byId("save-usual-basket").addEventListener("click", saveUsualBasket);
 byId("preview-usual-basket").addEventListener("click", previewUsualBasket);
+byId("repeat-usual-basket").addEventListener("click", repeatUsualBasket);
 // Invalidate displayed plans when the user changes planning assumptions.
 for (const input of ["plan-budget", "plan-currency", "plan-horizon", "custom-horizon-days"]) {
   byId(input).addEventListener("input", invalidateUsualBasketPreview);
   byId(input).addEventListener("change", invalidateUsualBasketPreview);
+  if (input === "plan-budget" || input === "plan-currency") {
+    byId(input).addEventListener("input", invalidateRecipeQuotes);
+    byId(input).addEventListener("change", invalidateRecipeQuotes);
+  }
 }
 for (const chip of document.querySelectorAll("[data-days]")) {
   chip.addEventListener("click", invalidateUsualBasketPreview);

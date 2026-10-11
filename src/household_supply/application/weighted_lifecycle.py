@@ -441,6 +441,20 @@ class WeightedProcurementService:
             }
             basis = json.dumps(receipt_basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
             source = f"weighted-plan:{plan_id.value}:" + sha256(basis).hexdigest()
+            # At most one completed purchase for this immutable single-line
+            # weighted plan. Check household events rather than just receipt
+            # files: event append can succeed before receipt persistence.
+            for recorded in self.household.history().events:
+                if (
+                    isinstance(recorded, PurchaseEvent)
+                    and recorded.source_ref.startswith(
+                        f"weighted-plan:{plan_id.value}:"
+                    )
+                    and recorded.event_id != event_id
+                ):
+                    raise WeightedProcurementConflict(
+                        "weighted plan already has another completed purchase"
+                    )
             existing = self.household.repository.get(event_id)
             if existing is not None:
                 if not isinstance(existing, PurchaseEvent) or (

@@ -56,7 +56,7 @@ class HouseholdBatchJournal:
         if self.path.is_symlink():
             raise BatchJournalError("batch database cannot be a symbolic link")
         try:
-            with self._connect() as conn:
+            with self.connection() as conn:
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS batches ("
                     "batch_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
@@ -78,9 +78,17 @@ class HouseholdBatchJournal:
         return connection
 
     @contextmanager
+    def connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    @contextmanager
     def writer(self) -> Iterator[sqlite3.Connection]:
         try:
-            with self._connect() as conn:
+            with self.connection() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     yield conn
@@ -203,14 +211,14 @@ class HouseholdBatchJournal:
                 "SELECT 1 FROM members WHERE event_id=?", (event_id.value,)
             ).fetchone() is not None
         try:
-            with self._connect() as connection:
+            with self.connection() as connection:
                 return self.member_exists(event_id, conn=connection)
         except sqlite3.DatabaseError as exc:
             raise BatchJournalError("cannot query batch event index") from exc
 
     def get(self, event_id: HouseholdEventId) -> HouseholdEvent | None:
         try:
-            with self._connect() as conn:
+            with self.connection() as conn:
                 found = conn.execute(
                     "SELECT b.batch_id, b.payload FROM batches b "
                     "JOIN members m ON m.batch_id=b.batch_id "
@@ -233,7 +241,7 @@ class HouseholdBatchJournal:
 
     def events(self) -> tuple[HouseholdEvent, ...]:
         try:
-            with self._connect() as conn:
+            with self.connection() as conn:
                 rows = conn.execute(
                     "SELECT batch_id, payload FROM batches ORDER BY batch_id"
                 ).fetchall()

@@ -251,3 +251,49 @@ def test_opt_in_http_requires_explicit_preview_save_and_real_receipt(tmp_path):
     }).status == 422
     assert api.handle("GET", "/household/history").body["event_count"] == 1
     assert transport.calls == 1
+
+
+def test_registered_weighted_item_can_be_stocktaken_without_fake_sku(tmp_path):
+    api = build_demo_app(tmp_path).api
+    assert api.handle("POST", "/household/stocktakes", {
+        "event_id": "stock-onion-100",
+        "item_id": "onion",
+        "quantity": {"amount": "250", "unit": "g"},
+        "reason": "observed by household",
+    }).status == 201
+    state = api.handle("GET", "/household/state").body["household"]
+    assert state["balances"] == [
+        {"item_id": "onion", "quantity": {"amount": "250", "unit": "g"}}
+    ]
+    assert api.handle("POST", "/household/stocktakes", {
+        "event_id": "stock-onion-101",
+        "item_id": "onion",
+        "quantity": {"amount": "1", "unit": "piece"},
+        "reason": "incompatible unit",
+    }).status == 422
+    assert api.handle("POST", "/household/stocktakes", {
+        "event_id": "stock-unknown-101",
+        "item_id": "unknown-fresh-product",
+        "quantity": {"amount": "200", "unit": "g"},
+        "reason": "unsupported source",
+    }).status == 422
+    assert api.handle("GET", "/household/history").body["event_count"] == 1
+
+
+def test_weighted_receipt_idempotence_across_grams_and_kilograms(tmp_path):
+    service, _, _ = _runtime(tmp_path)
+    p = service.preview("onion", Quantity("350", "g"), Money("25", "KGS"))
+    plan = service.save_plan(p.record.plan_id)
+    event_id = HouseholdEventId("receipt-onion-unit-equivalent")
+    first = service.confirm_actual(
+        plan_id=plan.plan_id, event_id=event_id,
+        actual_mass=Quantity("375", "g"), actual_cost=Money("19.50", "KGS"),
+        receipt_ref="receipt:unit-compatible",
+    )
+    second = service.confirm_actual(
+        plan_id=plan.plan_id, event_id=event_id,
+        actual_mass=Quantity("0.375", "kg"), actual_cost=Money("19.50", "KGS"),
+        receipt_ref="receipt:unit-compatible",
+    )
+    assert first == second
+    assert len(service.household.history().events) == 1

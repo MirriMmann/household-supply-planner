@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
-from household_supply.domain.money import Money
 from household_supply.domain.quantity import Quantity
 from household_supply.domain.weighted import (
     WeightedPriceEstimate, WeightedPriceObservation, estimate_weight_cost,
@@ -49,7 +48,10 @@ class GlobusWeightPriceService:
         if response.status != 200:
             raise GlobusOnlineFetchError("weighted Globus listing returned non-200")
         # Reject different identity, path, scheme, host or redirected credentials.
-        resolved = GlobusOnlineListing(response.final_url)
+        try:
+            resolved = GlobusOnlineListing(response.final_url)
+        except (TypeError, ValueError) as exc:
+            raise GlobusOnlineFetchError("weighted Globus redirect left the trusted boundary") from exc
         if (
             resolved.external_product_id != listing.external_product_id
             or resolved.seller_id != listing.seller_id

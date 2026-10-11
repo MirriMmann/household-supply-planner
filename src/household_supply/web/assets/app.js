@@ -26,6 +26,7 @@ const state = {
   recipeQuoteRevision: 0,
   weightCandidates: [],
   weightEstimateRevision: 0,
+  weightEstimateSupported: false,
   shoppingRecipeCandidates: [],
   shoppingReviewRevision: 0,
   usualBasketRepeatSettings: null,
@@ -2035,6 +2036,7 @@ function renderRecipeList() {
 async function loadWeightCandidates() {
   const data = await request("/catalog/weighted-candidates");
   state.weightCandidates = data.candidates || [];
+  state.weightEstimateSupported = Boolean(data.estimate_supported);
   const panel = byId("weighted-panel");
   panel.classList.toggle("hidden", !data.estimate_supported || !state.weightCandidates.length);
   const select = byId("weighted-item");
@@ -2138,6 +2140,43 @@ function renderShoppingReadiness(data) {
       : item.kind === "weighted_reference" ? "весовой товар (правила продажи не подтверждены)"
       : "нет поддерживаемого SKU";
     row.textContent = `${item.name}: ${humanQuantity(item.required)} — ${stockText}; ${kindText}`;
+    if (
+      item.kind === "weighted_reference" &&
+      item.stock_status === "short" &&
+      item.missing &&
+      state.weightEstimateSupported
+    ) {
+      const quoteButton = document.createElement("button");
+      quoteButton.type = "button";
+      quoteButton.className = "secondary-button";
+      quoteButton.textContent = "Проверить цену за вес";
+      const quoteResult = document.createElement("span");
+      quoteResult.className = "shopping-weight-price";
+      quoteButton.addEventListener("click", async () => {
+        quoteButton.disabled = true;
+        quoteResult.textContent = " Получаем свежую справочную цену…";
+        try {
+          const quoted = await request("/catalog/weighted-candidates/estimate", {
+            method: "POST",
+            body: JSON.stringify({
+              item_id: item.item_id, quantity: item.missing,
+            }),
+          });
+          if (quoted.listing_available && quoted.estimated_upper_bound) {
+            quoteResult.textContent = ` Ориентир: до ${moneyText(quoted.estimated_upper_bound)}. Покупка не подтверждена.`;
+          } else {
+            quoteResult.textContent = " Цена неизвестна или товар недоступен.";
+          }
+        } catch (error) {
+          quoteResult.textContent = ` ${friendlyError(error)}`;
+        } finally {
+          quoteButton.disabled = false;
+        }
+      });
+      row.appendChild(document.createTextNode(" "));
+      row.appendChild(quoteButton);
+      row.appendChild(quoteResult);
+    }
     if (item.source_ref) {
       const link = document.createElement("a");
       link.href = item.source_ref;

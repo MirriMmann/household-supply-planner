@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from selenium import webdriver
@@ -673,6 +673,14 @@ def shared_weighted_shopping_readiness(browser) -> None:
         ).text
         assert api(base, "/plans?limit=12")["plans"] == []
         assert api(base, "/household/history")["event_count"] == 0
+        # The atomic receipt-publishing pathway is private and must never be
+        # reachable from the ordinary offline home/mobile product assembly.
+        try:
+            api(base, "/mixed/plans/mp-test-atomic/receipt", {"receipt_ref": "forbidden"})
+        except HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("mixed receipt API exposed without authorized pilot")
         viewport_check(browser, "shared shopping weight review")
         screenshot(browser, "20-shared-weight-shopping-readonly")
         print(

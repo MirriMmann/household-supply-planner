@@ -574,9 +574,24 @@ class MixedPlanService:
             preview = self._previews.get(plan_id)
             if preview is None:
                 raise MixedPlanConflict("no pending mixed plan preview")
-            if self._now() > preview.expires_at:
+            now = self._now()
+            if now > preview.expires_at:
                 del self._previews[plan_id]
                 raise MixedPlanConflict("mixed plan preview expired")
+            # Preview validity is not sufficient on its own: a seller rule
+            # could expire before the preview TTL. Source authority remains
+            # time-bound until the explicit saved-plan decision.
+            if any(not now - self.max_age <= p.observed_at <= now
+                   for p in preview.record.packages):
+                raise MixedPlanConflict("packaged price expired before mixed save")
+            if any(
+                not (
+                    now - self.max_age <= w.record.quote.observation.observed_at <= now
+                    and now - self.max_rule_age <= w.record.quote.rule.verified_at <= now
+                )
+                for w in preview.record.weights
+            ):
+                raise MixedPlanConflict("weighted evidence expired before mixed save")
             current = tuple(
                 event.event_id.value for event in self.shopping.household.history().events
             )

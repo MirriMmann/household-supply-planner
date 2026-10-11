@@ -436,7 +436,7 @@ class WeightedProcurementService:
             # Fingerprint binds the completed receipt to exactly one household event.
             receipt_basis = {
                 "plan_id": plan_id.value, "event_id": event_id.value,
-                "actual_mass_g": str(actual_mass.base_amount),
+                "actual_mass_g": format(actual_mass.base_amount.normalize(), "f"),
                 "actual_cost": _money(actual_cost), "receipt_ref": receipt_ref,
             }
             basis = json.dumps(receipt_basis, sort_keys=True, separators=(",", ":")).encode("utf-8")

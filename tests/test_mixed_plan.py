@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from dataclasses import replace
 import json
 
 import pytest
@@ -15,7 +14,6 @@ from household_supply.application.mixed_plan import (
     FileMixedPlanRepository, MixedPlanConflict, MixedPlanError,
     MixedPlanRecord, MixedPlanService, MixedPlanStorageError,
 )
-from household_supply.application.persistence import PlanId
 from household_supply.application.service import PlanApplicationService
 from household_supply.application.shopping_readiness import (
     ShoppingDemand, ShoppingReadinessService,
@@ -268,3 +266,26 @@ def test_source_less_globus_weighted_cart_disallows_live_mixed_plan(tmp_path):
     assert metadata.body["mixed_plan_enabled"] is False
     assert live.api.handle("POST", "/mixed/plans/preview", {}).status == 404
     assert live.api.handle("POST", "/mixed/plans/confirm", {}).status == 404
+
+
+def test_seller_rule_can_expire_during_active_preview_before_explicit_save(tmp_path):
+    app, service, _, _ = runtime(tmp_path)
+    with_known_stock(app)
+    now = datetime.now(timezone.utc)
+    service.clock = lambda: now
+    service.prices.clock = lambda: now
+    service.shopping.clock = lambda: now
+    service.package_planner.clock = lambda: now
+
+    # A controlled rule source, within the 1-hour TTL at preview time,
+    # but older than that TTL when the user returns 10 minutes later.
+    service.max_rule_age = timedelta(hours=1)
+    service.sale_rules = lambda item_id, source_ref: VerifiedWeightSaleRule(
+        item_id, source_ref, now - timedelta(minutes=55),
+        Quantity("300", "g"), Quantity("100", "g"),
+    )
+    preview = service.preview(demands=mixed_needs(), budget=Money("110", "KGS"))
+    service.clock = lambda: now + timedelta(minutes=10)
+    with pytest.raises(MixedPlanConflict, match="weighted evidence expired"):
+        service.confirm(preview.record.plan_id)
+    assert service.repository.get(preview.record.plan_id) is None

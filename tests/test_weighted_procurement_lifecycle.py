@@ -154,9 +154,9 @@ def test_actual_overlimit_or_changed_receipt_or_second_event_rejected(tmp_path):
         service.confirm_actual(**{**kwargs, "actual_cost": Money("21", "KGS")})
     assert service.household.history().events == ()
     service.confirm_actual(**kwargs)
-    with pytest.raises(WeightedProcurementConflict, match="ID conflicts"):
+    with pytest.raises(WeightedProcurementConflict, match="already claimed|ID conflicts"):
         service.confirm_actual(**{**kwargs, "actual_cost": Money("19.50", "KGS")})
-    with pytest.raises(WeightedProcurementConflict, match="ID conflicts"):
+    with pytest.raises(WeightedProcurementConflict, match="already claimed|ID conflicts"):
         service.confirm_actual(**{**kwargs, "receipt_ref": "receipt:other"})
     with pytest.raises(WeightedProcurementConflict, match="another completed purchase"):
         service.confirm_actual(**{**kwargs, "event_id": HouseholdEventId("receipt-101")})

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from examples.m11_local_web import build_demo_catalog, build_live_globus_app
 from household_supply.application.kyrgyz_recipes import KYRGYZ_RECIPE_SPECS
 from household_supply.application.recipe_catalog import (

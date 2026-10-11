@@ -18,6 +18,7 @@ from household_supply.market.catalogs.globus_weight_candidates import (
 )
 
 from .usual_basket_api import UsualBasketWebApi
+from .weighted_api import WeightedReferenceWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -145,9 +146,15 @@ class HouseholdWebJsonApi:
     reset_service: LocalDataResetService | None = None
     usual_basket_api: UsualBasketWebApi | None = None
     recipe_api: RecipeWebApi | None = None
+    weighted_api: WeightedReferenceWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.weighted_api is not None
+            and self.weighted_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.recipe_api is not None
             and self.recipe_api.accepts_json_body(method, path)
@@ -188,6 +195,11 @@ class HouseholdWebJsonApi:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.usual_basket_api.handle(method, path, payload)
 
+        if target.path == "/catalog/weighted-candidates/estimate":
+            if self.weighted_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.weighted_api.handle(method, path, payload)
+
         if target.path == "/catalog/weighted-candidates":
             if target.query:
                 return JsonApiResponse(400, {"error": "invalid_query"})
@@ -195,6 +207,7 @@ class HouseholdWebJsonApi:
                 return JsonApiResponse(405, {"error": "method_not_allowed"})
             return JsonApiResponse(200, {
                 "candidates": list(serialize_weight_candidates()),
+                "estimate_supported": self.weighted_api is not None,
                 "notice": (
                     "Весовые позиции приведены только для исследования рынка. "
                     "HSM пока не может создавать из них закупки или утверждать актуальную цену."

@@ -24,6 +24,8 @@ const state = {
   usualBasketPreviewRevision: 0,
   recipes: [],
   recipeQuoteRevision: 0,
+  weightCandidates: [],
+  weightEstimateRevision: 0,
   usualBasketRepeatSettings: null,
   usualBasketRepeating: false,
 };
@@ -2028,6 +2030,69 @@ function renderRecipeList() {
   }
 }
 
+async function loadWeightCandidates() {
+  const data = await request("/catalog/weighted-candidates");
+  state.weightCandidates = data.candidates || [];
+  const panel = byId("weighted-panel");
+  panel.classList.toggle("hidden", !data.estimate_supported || !state.weightCandidates.length);
+  const select = byId("weighted-item");
+  select.replaceChildren();
+  for (const candidate of state.weightCandidates) {
+    const option = document.createElement("option");
+    option.value = candidate.item_id;
+    option.textContent = candidate.item_name;
+    select.appendChild(option);
+  }
+  state.weightEstimateRevision += 1;
+  byId("weighted-estimate-result").textContent = "";
+}
+
+async function submitWeightEstimate(event) {
+  event.preventDefault();
+  const revision = ++state.weightEstimateRevision;
+  const result = byId("weighted-estimate-result");
+  result.replaceChildren();
+  const button = byId("weighted-estimate-button");
+  const itemId = byId("weighted-item").value;
+  const amount = normalizeNumberInput(byId("weighted-mass").value);
+  if (!/^\d+(?:\.\d+)?$/.test(amount) || !(Number(amount) > 0)) {
+    result.textContent = "Введите положительную массу в килограммах.";
+    return;
+  }
+  button.disabled = true;
+  result.textContent = "Получаем цену из Globus…";
+  try {
+    const data = await request("/catalog/weighted-candidates/estimate", {
+      method: "POST",
+      body: JSON.stringify({
+        item_id: itemId,
+        quantity: { amount, unit: "kg" },
+      }),
+    });
+    if (revision !== state.weightEstimateRevision) return;
+    if (!data.listing_available || !data.reference_unit_price) {
+      result.textContent = "В публичном каталоге товар сейчас отмечен недоступным. Стоимость неизвестна.";
+      return;
+    }
+    const requested = humanQuantity(data.requested);
+    const upper = moneyText(data.estimated_upper_bound);
+    const price = moneyText(data.reference_unit_price);
+    result.textContent = `Для ${requested} справочный расчёт: до ${upper} (цена ${price} за 1 кг). Это не подтверждённая сумма продажи и не список покупок. `;
+    const source = document.createElement("a");
+    source.href = data.source_ref;
+    source.target = "_blank";
+    source.rel = "noopener noreferrer";
+    source.textContent = "Карточка товара";
+    result.appendChild(source);
+  } catch (error) {
+    if (revision === state.weightEstimateRevision) {
+      result.textContent = friendlyError(error);
+    }
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadRecipes() {
   const response = await request("/recipes");
   state.recipes = response.recipes || [];
@@ -2046,6 +2111,7 @@ async function refreshAll() {
     await loadUsualBasket();
     await refreshOperationalState();
     await loadRecipes();
+    await loadWeightCandidates();
     setConnection(true, "Работает");
   } catch (error) {
     setConnection(false, "Нет связи");
@@ -2065,6 +2131,13 @@ byId("refresh-recipes").addEventListener("click", async () => {
     showToast(friendlyError(error), true);
   }
 });
+byId("weighted-estimate-form").addEventListener("submit", submitWeightEstimate);
+for (const id of ["weighted-item", "weighted-mass"]) {
+  byId(id).addEventListener("input", () => {
+    state.weightEstimateRevision += 1;
+    byId("weighted-estimate-result").textContent = "";
+  });
+}
 byId("save-usual-basket").addEventListener("click", saveUsualBasket);
 byId("preview-usual-basket").addEventListener("click", previewUsualBasket);
 byId("repeat-usual-basket").addEventListener("click", repeatUsualBasket);

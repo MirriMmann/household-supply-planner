@@ -56,6 +56,20 @@
         <div id="recipes-list" class="recipes-list"></div>
       </details>
 
+      <details class="secondary-operation weighted-panel hidden" id="weighted-panel">
+        <summary>Товары на вес — справочный расчёт</summary>
+        <p>Цена за килограмм не означает фиксированную упаковку. Расчёт не создаёт список покупок и не учитывает неизвестные остатки.</p>
+        <form id="weighted-estimate-form" class="weighted-form">
+          <label for="weighted-item">Товар</label>
+          <select id="weighted-item" required></select>
+          <label for="weighted-mass">Сколько нужно (кг)</label>
+          <input id="weighted-mass" type="text" inputmode="decimal" value="0,5" required />
+          <button type="submit" class="secondary-button" id="weighted-estimate-button">Узнать справочную стоимость</button>
+        </form>
+        <p id="weighted-estimate-result" aria-live="polite"></p>
+        <p class="human-note">Без подтверждённых правил минимального веса и шага продажи позицию нельзя сохранить как закупку.</p>
+      </details>
+
       <details class="secondary-operation usual-basket-panel hidden" id="usual-basket-panel">
         <summary>Моя обычная закупка</summary>
         <p>Выберите привычные товары. Если истории расхода пока нет, можно явно указать резервное количество на эту закупку.</p>

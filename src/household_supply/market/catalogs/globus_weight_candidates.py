@@ -92,7 +92,7 @@ WEIGHT_CANDIDATES: tuple[GlobusWeightCandidate, ...] = (
     GlobusWeightCandidate(
         "black_pepper", "Перец чёрный", "Перец черный 2сорт вес",
         "https://globus-online.kg/ru-kg/good/3853044f04ec4d3d9733d68d5167aac0000200010000",
-        "100", "g",
+        "1", "kg",
     ),
 )
 

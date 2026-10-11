@@ -778,7 +778,12 @@ def mixed_receipt_review_mobile(browser) -> None:
         fees = browser.find_element(By.ID, "mixed-receipt-fees")
         fees.clear()
         fees.send_keys("0.5")
-        browser.find_element(By.ID, "mixed-receipt-price-approval").click()
+        approval = browser.find_element(By.ID, "mixed-receipt-price-approval")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            approval,
+        )
+        approval.click()
 
         preview = browser.find_element(By.ID, "mixed-receipt-preview")
         browser.execute_script(

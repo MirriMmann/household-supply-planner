@@ -26,6 +26,15 @@ PACKAGED_ITEMS = {
     "vinegar_9_percent": 1,
     "breadcrumbs": 1,
     "pepper_blend": 1,
+    "dishwashing_liquid": 2,
+    "toothpaste": 2,
+    "liquid_hand_soap": 1,
+    "dish_sponge": 2,
+    "toilet_paper_roll": 2,
+    "trash_bag_30l": 1,
+    "trash_bag_60l": 1,
+    "laundry_powder_color": 1,
+    "shampoo": 2,
 }
 WEIGHT_ITEM_IDS = {
     "onion", "potato", "beef", "beef_mince", "carrot", "tomato",
@@ -35,8 +44,8 @@ WEIGHT_ITEM_IDS = {
 
 def test_exact_new_packaged_stock_coverage_and_binding_integrity():
     catalog, listings = build_globus_demo_staples_catalog()
-    assert len(catalog.skus) == 76
-    assert len({sku.item.id for sku in catalog.skus}) == 36
+    assert len(catalog.skus) == 90
+    assert len({sku.item.id for sku in catalog.skus}) == 45
     assert len(catalog.bindings) == len(catalog.skus) == len(listings)
     assert len({listing.external_product_id for listing in listings}) == len(listings)
     assert len({sku.id for sku in catalog.skus}) == len(catalog.skus)
@@ -46,7 +55,7 @@ def test_exact_new_packaged_stock_coverage_and_binding_integrity():
         assert len(skus) == count
         assert len({sku.package_quantity.dimension for sku in skus}) == 1
         assert all(sku.package_quantity.amount > 0 for sku in skus)
-        assert all(sku.package_quantity.unit in {"g", "ml"} for sku in skus)
+        assert all(sku.package_quantity.unit in {"g", "kg", "ml", "piece"} for sku in skus)
 
     # A pepper BLEND is not pure black pepper, and concentrated tomato paste
     # is not a measured fresh tomato ingredient in a recipe.
@@ -56,6 +65,10 @@ def test_exact_new_packaged_stock_coverage_and_binding_integrity():
     assert "black_pepper" not in ids
     assert "tomato_paste" in ids
     assert "tomato" not in ids
+    assert {sku.package_quantity.amount for sku in catalog.skus if sku.item.id == "toilet_paper_roll"} == {4, 8}
+    assert {sku.package_quantity.amount for sku in catalog.skus if sku.item.id == "dish_sponge"} == {1, 7}
+    assert {sku.package_quantity.amount for sku in catalog.skus if sku.item.id == "trash_bag_30l"} == {20}
+    assert "trash_bag_30l" != "trash_bag_60l"
 
 
 def test_weight_reference_sources_are_bounded_and_not_offer_authority():

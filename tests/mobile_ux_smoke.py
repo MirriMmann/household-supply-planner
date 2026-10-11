@@ -744,22 +744,116 @@ def mixed_receipt_review_mobile(browser) -> None:
         if onboarding.is_displayed():
             browser.find_element(By.ID, "onboarding-skip").click()
 
-        browser.find_element(By.CSS_SELECTOR, '[data-view="history"]').click()
-        panel = browser.find_element(By.ID, "mixed-receipt-review-panel")
-        wait.until(lambda d: not panel.get_attribute("hidden"))
-        assert not panel.get_attribute("hidden")
-        summary = panel.find_element(By.TAG_NAME, "summary")
+        # M12.19: derive and save a new mixed plan through the actual UI,
+        # rather than injecting a previously saved fixture PlanId.
+        mixed_panel = browser.find_element(By.ID, "mixed-shopping-panel")
+        wait.until(lambda d: not mixed_panel.get_attribute("hidden"))
+        assert not browser.find_element(
+            By.ID, "shopping-to-mixed-recipe"
+        ).get_attribute("hidden")
+        summary = mixed_panel.find_element(By.TAG_NAME, "summary")
         browser.execute_script(
             "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
             summary,
         )
         summary.click()
-        identifier = browser.find_element(By.ID, "mixed-receipt-plan-id")
-        identifier.send_keys(plan_id)
-        browser.find_element(By.ID, "mixed-receipt-load").click()
+        manual = browser.find_element(
+            By.CSS_SELECTOR, '#mixed-shopping-panel input[value="manual"]'
+        )
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            manual,
+        )
+        manual.click()
+        rows = browser.find_elements(By.CSS_SELECTOR, ".mixed-shopping-demand-row")
+        assert len(rows) == 1
+        Select(rows[0].find_element(By.TAG_NAME, "select")).select_by_value("onion")
+        onion_amount = rows[0].find_element(By.TAG_NAME, "input")
+        onion_amount.clear()
+        onion_amount.send_keys("0.35")
+        Select(rows[0].find_elements(By.TAG_NAME, "select")[1]).select_by_value("kg")
+        add_item = browser.find_element(By.ID, "mixed-shopping-add-item")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            add_item,
+        )
+        add_item.click()
+        rows = browser.find_elements(By.CSS_SELECTOR, ".mixed-shopping-demand-row")
+        assert len(rows) == 2
+        Select(rows[1].find_element(By.TAG_NAME, "select")).select_by_value("rice")
+        rice_amount = rows[1].find_element(By.TAG_NAME, "input")
+        rice_amount.clear()
+        rice_amount.send_keys("0.2")
+        Select(rows[1].find_elements(By.TAG_NAME, "select")[1]).select_by_value("kg")
+        budget = browser.find_element(By.ID, "mixed-shopping-budget")
+        budget.clear()
+        budget.send_keys("110")
+        plan_preview = browser.find_element(By.ID, "mixed-shopping-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            plan_preview,
+        )
+        plan_preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-result"
+        ).get_attribute("hidden"))
+        assert "110" in browser.find_element(By.ID, "mixed-shopping-lines").text
+        assert api(base, "/household/history")["event_count"] == 2
+        save_plan = browser.find_element(By.ID, "mixed-shopping-save")
+        assert not save_plan.is_enabled()
+        screenshot(browser, "21-mixed-shopping-preview-no-inventory")
+
+        # Changing an assumption invalidates the approval and requires
+        # another full market/pricing review, even after restoring the value.
+        budget.clear()
+        budget.send_keys("111")
+        assert browser.find_element(By.ID, "mixed-shopping-result").get_attribute("hidden")
+        assert not save_plan.is_enabled()
+        budget.clear()
+        budget.send_keys("110")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            plan_preview,
+        )
+        plan_preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-result"
+        ).get_attribute("hidden"))
+        consent_plan = browser.find_element(By.ID, "mixed-shopping-consent")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            consent_plan,
+        )
+        consent_plan.click()
+        assert save_plan.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            save_plan,
+        )
+        save_plan.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-shopping-saved"
+        ).get_attribute("hidden"))
+        saved_text = browser.find_element(By.ID, "mixed-shopping-saved-info").text
+        import re
+        matched = re.search(r"mp-[0-9a-f]{32}", saved_text)
+        assert matched is not None, saved_text
+        plan_id = matched.group()
+        assert api(base, f"/mixed/plans/{plan_id}")["plan"]["plan_id"] == plan_id
+        assert api(base, "/household/history")["event_count"] == 2
+
+        handoff = browser.find_element(By.ID, "mixed-shopping-open-receipt")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            handoff,
+        )
+        handoff.click()
         wait.until(lambda d: not d.find_element(
             By.ID, "mixed-receipt-editor"
         ).get_attribute("hidden"))
+        assert browser.find_element(By.ID, "mixed-receipt-plan-id").get_attribute("value") == plan_id
+        assert browser.find_element(By.CSS_SELECTOR, '[data-view="history"]').get_attribute("class").find("active") >= 0
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "not_received"
         assert api(base, "/household/history")["event_count"] == 2
 
         # Simulate actual delivery of 290g against a planned 300g.

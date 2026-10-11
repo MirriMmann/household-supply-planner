@@ -107,9 +107,14 @@ class MixedPackLine:
             raise MixedPlanError("invalid package quantity or price")
         if self.cost != self.unit_price * self.packs:
             raise MixedPlanError("packaged cost mismatch")
-        if self.acquired != Quantity(
+        expected = Quantity(
             multiply_decimal_by_int_exact(self.package.amount, self.packs),
             self.package.unit,
+        )
+        # The existing M3 planner normalizes acquired quantity to a base
+        # unit (e.g. a 1kg SKU yields 1000g). Preserve that semantics.
+        if not self.acquired.compatible_with(expected) or (
+            self.acquired.base_amount != expected.base_amount
         ):
             raise MixedPlanError("packaged purchased quantity mismatch")
 
@@ -466,6 +471,10 @@ class MixedPlanService:
             if candidate is None or candidate.source_url != observed.source_ref:
                 raise MixedPlanError("weighted source identity is not approved")
             quote = quote_verified_mass(observed, rule, missing)
+            if quote.estimated_upper_bound.currency != budget.currency:
+                raise MixedPlanError("weighted quote budget currency mismatch")
+            if quote.estimated_upper_bound.amount > budget.amount:
+                raise MixedPlanError("weighted purchases alone exceed hard budget")
             weighted.append(MixedWeightLine(WeightedPlanRecord(
                 plan_id=PlanId("mw-" + uuid4().hex),
                 item=Item(line["item_id"], candidate.item_name, "weighted_grocery"),

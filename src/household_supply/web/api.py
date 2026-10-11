@@ -19,6 +19,7 @@ from household_supply.market.catalogs.globus_weight_candidates import (
 
 from .usual_basket_api import UsualBasketWebApi
 from .weighted_api import WeightedReferenceWebApi
+from .weighted_procurement_api import WeightedProcurementWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -147,9 +148,15 @@ class HouseholdWebJsonApi:
     usual_basket_api: UsualBasketWebApi | None = None
     recipe_api: RecipeWebApi | None = None
     weighted_api: WeightedReferenceWebApi | None = None
+    weighted_procurement_api: WeightedProcurementWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.weighted_procurement_api is not None
+            and self.weighted_procurement_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.weighted_api is not None
             and self.weighted_api.accepts_json_body(method, path)
@@ -194,6 +201,11 @@ class HouseholdWebJsonApi:
             if self.usual_basket_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.usual_basket_api.handle(method, path, payload)
+
+        if target.path == "/weighted/plans" or target.path.startswith("/weighted/plans/"):
+            if self.weighted_procurement_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.weighted_procurement_api.handle(method, path, payload)
 
         if target.path == "/catalog/weighted-candidates/estimate":
             if self.weighted_api is None:

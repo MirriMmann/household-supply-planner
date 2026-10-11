@@ -1969,7 +1969,7 @@ function renderRecipeList() {
           const lines = (data.plan.purchases || []).map(
             (entry) => `${itemName(entry.item_id)}: ${packageText(entry.packs)}`,
           );
-          result.textContent = `Стоимость упаковок: ${moneyText(data.estimated_purchase_cost)}. ${lines.join("; ")}. Сохранение плана — отдельное действие; покупка ещё не совершена.`;
+          result.textContent = `Стоимость упаковок: ${moneyText(data.estimated_purchase_cost)}. ${lines.join("; ")}. Это предпросмотр; список сохраняется отдельно, покупки пока не совершены.`;
           if (data.preview_id) {
             pendingPreviewId = data.preview_id;
             confirmButton.classList.remove("hidden");

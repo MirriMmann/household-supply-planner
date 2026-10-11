@@ -42,6 +42,8 @@ from household_supply.domain import (
 )
 from household_supply.household import FileHouseholdEventRepository, HouseholdLearningService
 from household_supply.market import GlobusCatalogProviderFactory
+from household_supply.market.providers.globus_weight import GlobusWeightPriceService
+from household_supply.web.weighted_api import WeightedReferenceWebApi
 from household_supply.web import (
     HouseholdLocalWebApp,
     HouseholdWebJsonApi,
@@ -116,6 +118,7 @@ def _build_web_app(
     catalog: CatalogSnapshot,
     planner,
     allow_remote_hosts: bool = False,
+    weighted_prices: GlobusWeightPriceService | None = None,
 ) -> HouseholdLocalWebApp:
     household_repository = FileHouseholdEventRepository(
         data_dir / "household-events"
@@ -142,6 +145,10 @@ def _build_web_app(
     )
     web_api = HouseholdWebJsonApi(
         closed_loop, catalog, reset_service,
+        weighted_api=(
+            None if weighted_prices is None
+            else WeightedReferenceWebApi(weighted_prices)
+        ),
         recipe_api=RecipeWebApi(
             household, planner, clock=utc_now,
             confirmation=RecipePlanCommitService(household, lifecycle),
@@ -190,6 +197,7 @@ def build_live_globus_app(
         catalog=catalog,
         planner=planner,
         allow_remote_hosts=allow_remote_hosts,
+        weighted_prices=GlobusWeightPriceService(),
     )
 
 

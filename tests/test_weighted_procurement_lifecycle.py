@@ -13,7 +13,7 @@ import json
 import pytest
 
 from household_supply.application.weighted_lifecycle import (
-    FileWeightedPlanRepository, WeightedProcurementConflict,
+    FileWeightedPlanRepository, WeightedCompletionClaim, WeightedProcurementConflict,
     WeightedProcurementError, WeightedProcurementService, WeightedStorageError,
 )
 from household_supply.domain import Money, Quantity
@@ -297,3 +297,28 @@ def test_weighted_receipt_idempotence_across_grams_and_kilograms(tmp_path):
     )
     assert first == second
     assert len(service.household.history().events) == 1
+
+
+def test_atomic_plan_completion_claim_blocks_second_event_across_instances(tmp_path):
+    one, _, _ = _runtime(tmp_path)
+    preview = one.preview("onion", Quantity("350", "g"), Money("25", "KGS"))
+    plan = one.save_plan(preview.record.plan_id)
+    two, _, _ = _runtime(tmp_path)
+
+    # Mimic a different worker that reserved the plan but crashed before
+    # appending the household event. There must be no second authorization.
+    prior = WeightedCompletionClaim(
+        plan.plan_id, HouseholdEventId("receipt-prior-worker"), "a" * 64
+    )
+    one.repository.claim_completion(prior)
+    assert two.repository.get_completion(plan.plan_id) == prior
+    one.repository.claim_completion(prior)
+    with pytest.raises(WeightedProcurementConflict, match="already claimed"):
+        two.confirm_actual(
+            plan_id=plan.plan_id,
+            event_id=HouseholdEventId("receipt-second-worker"),
+            actual_mass=Quantity("375", "g"),
+            actual_cost=Money("19.50", "KGS"),
+            receipt_ref="receipt:second-worker",
+        )
+    assert one.household.history().events == ()

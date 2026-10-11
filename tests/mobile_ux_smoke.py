@@ -825,7 +825,12 @@ def mixed_receipt_review_mobile(browser) -> None:
         assert browser.find_element(By.ID, "mixed-receipt-retry").get_attribute("hidden")
 
         # Reentry must not generate a second purchase.
-        browser.find_element(By.ID, "mixed-receipt-load").click()
+        reload_button = browser.find_element(By.ID, "mixed-receipt-load")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reload_button,
+        )
+        reload_button.click()
         wait.until(lambda d: "уже обработан" in d.find_element(
             By.ID, "mixed-receipt-claimed-details"
         ).text)

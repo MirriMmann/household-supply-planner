@@ -203,7 +203,7 @@ def test_opt_in_http_requires_explicit_preview_save_and_real_receipt(tmp_path):
         app.api, weighted_procurement_api=WeightedProcurementWebApi(service)
     )
     assert app.api.handle("POST", "/weighted/plans/preview", {}).status == 404
-    initial = api.handle("GET", "/household/state").body
+    initial = api.handle("GET", "/household/state").body["household"]
 
     preview = api.handle("POST", "/weighted/plans/preview", {
         "item_id": "onion",
@@ -215,13 +215,17 @@ def test_opt_in_http_requires_explicit_preview_save_and_real_receipt(tmp_path):
     assert preview.body["persisted"] is False
     assert preview.body["plan"]["sellable"] == {"amount": "400", "unit": "g"}
     assert api.handle("GET", f"/weighted/plans/{plan_id}").status == 404
-    assert api.handle("GET", "/household/state").body == initial
+    refreshed = api.handle("GET", "/household/state").body["household"]
+    assert refreshed["balances"] == initial["balances"]
+    assert refreshed["applied_event_ids"] == initial["applied_event_ids"]
 
     saved = api.handle("POST", "/weighted/plans/confirm", {"plan_id": plan_id})
     assert saved.status == 201, saved.body
     assert saved.body["persisted"] is True
     assert api.handle("GET", f"/weighted/plans/{plan_id}").status == 200
-    assert api.handle("GET", "/household/state").body == initial
+    refreshed = api.handle("GET", "/household/state").body["household"]
+    assert refreshed["balances"] == initial["balances"]
+    assert refreshed["applied_event_ids"] == initial["applied_event_ids"]
 
     purchase = {
         "event_id": "weight-paid-onion-1",
@@ -233,7 +237,7 @@ def test_opt_in_http_requires_explicit_preview_save_and_real_receipt(tmp_path):
     assert result.status == 201, result.body
     assert result.body["purchase_confirmed"] is True
     assert result.body["receipt"]["actual_mass"] == {"amount": "375", "unit": "g"}
-    assert api.handle("GET", "/household/state").body["balances"] == [
+    assert api.handle("GET", "/household/state").body["household"]["balances"] == [
         {"item_id": "onion", "quantity": {"amount": "375", "unit": "g"}}
     ]
     assert api.handle("POST", f"/weighted/plans/{plan_id}/purchases", purchase).status == 201

@@ -35,7 +35,12 @@ The separate governed pilot enforces:
    receipt snapshot and bind its item/mass/cost/reference to the purchase
    event source fingerprint. Idempotent retries do not duplicate inventory;
    equivalent gram/kilogram representations share the same receipt identity.
-   Another event cannot complete the same single-line plan.
+   Another event cannot complete the same single-line plan. A **plan-keyed,
+   create-only completion claim** is stored before appending the event, with
+   the exact receipt fingerprint. It also prevents two different worker
+   processes from completing one saved plan concurrently. A crash after claim
+   but before append is recoverable only by retrying the same exact receipt,
+   never by creating a different event ID.
 7. If household event persistence succeeded but receipt persistence failed,
    retry the same event/receipt to recover the missing record; conflicting
    receipt data fails closed. The test proves this boundary for offline data.

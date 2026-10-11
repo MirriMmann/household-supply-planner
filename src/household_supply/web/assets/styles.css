@@ -641,6 +641,10 @@ body.onboarding-open { overflow: hidden; }
 #confirm-usual-basket { width: 100%; min-height: 44px; margin-block: 12px 6px; }
 
 #repeat-usual-basket { min-height: 44px; scroll-margin-block: 120px; }
+.weighted-form { display: grid; gap: 8px; margin-top: 12px; }
+.weighted-form label { font-weight: 650; }
+.weighted-form select, .weighted-form input, .weighted-form button { width: 100%; min-height: 44px; min-width: 0; }
+#weighted-estimate-result { color: var(--muted); font-size: .9rem; margin-top: 10px; overflow-wrap: anywhere; }
 
 .recipes-list { display: grid; gap: 9px; margin-top: 12px; }
 .recipe-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; }

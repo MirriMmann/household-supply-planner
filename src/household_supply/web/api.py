@@ -229,6 +229,8 @@ class HouseholdWebJsonApi:
                 )
             if self.usual_basket_api is not None and self.usual_basket_api.confirmation is not None:
                 self.usual_basket_api.confirmation.discard_previews()
+            if self.recipe_api is not None and self.recipe_api.confirmation is not None:
+                self.recipe_api.confirmation.discard_previews()
             return JsonApiResponse(
                 200,
                 {

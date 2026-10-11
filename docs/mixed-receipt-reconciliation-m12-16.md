@@ -30,6 +30,11 @@ be less than the approved pack count; actual measured weight may be less
 than the sellable weight. Neither may exceed its approved amount. Receipt
 closure means *the received facts have been recorded*, not that the entire
 recipe's original demand was covered: a short delivery remains short.
+The completed receipt response includes **fulfillment** per Item (required
+deficit, actual received, still missing, and whether its event was credited),
+**all_demands_fulfilled**, and the paid-budget remainder. For example, 290 g
+received against a 300 g shortage leaves **10 g missing** despite the receipt
+having state=completed.
 
 ## Explicit private API
 

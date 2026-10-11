@@ -22,6 +22,7 @@ from .weighted_api import WeightedReferenceWebApi
 from .weighted_procurement_api import WeightedProcurementWebApi
 from .shopping_readiness_api import ShoppingReadinessWebApi
 from .mixed_plan_api import MixedPlanWebApi
+from .mixed_receipt_api import MixedReceiptWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -153,9 +154,15 @@ class HouseholdWebJsonApi:
     weighted_procurement_api: WeightedProcurementWebApi | None = None
     shopping_readiness_api: ShoppingReadinessWebApi | None = None
     mixed_plan_api: MixedPlanWebApi | None = None
+    mixed_receipt_api: MixedReceiptWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.mixed_receipt_api is not None
+            and self.mixed_receipt_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.mixed_plan_api is not None
             and self.mixed_plan_api.accepts_json_body(method, path)
@@ -205,6 +212,11 @@ class HouseholdWebJsonApi:
         target = urlsplit(path)
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
+
+        if target.path.startswith("/mixed/plans/") and target.path.endswith("/receipt"):
+            if self.mixed_receipt_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.mixed_receipt_api.handle(method, path, payload)
 
         if target.path == "/mixed/plans" or target.path.startswith("/mixed/plans/"):
             if self.mixed_plan_api is None:

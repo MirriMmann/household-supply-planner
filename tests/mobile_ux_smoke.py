@@ -617,6 +617,70 @@ def recipes_from_home(browser) -> None:
         )
 
 
+def shared_weighted_shopping_readiness(browser) -> None:
+    """All seven ingredients visible while unavailable weight purchases stay blocked."""
+    with demo() as base:
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(By.CSS_SELECTOR, "#connection-status.online"))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+
+        panel = browser.find_element(By.ID, "shopping-readiness-panel")
+        summary = panel.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        summary.click()
+        recipe = browser.find_element(By.ID, "shopping-recipe-select")
+        wait.until(lambda d: len(Select(d.find_element(
+            By.ID, "shopping-recipe-select"
+        )).options) == 5)
+        Select(recipe).select_by_value("kg-kuurdak-beef")
+        button = browser.find_element(By.ID, "preview-shopping-recipe")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            button,
+        )
+        button.click()
+        wait.until(lambda d: len(d.find_elements(
+            By.CSS_SELECTOR, "#shopping-readiness-result li"
+        )) == 7)
+        text = browser.find_element(By.ID, "shopping-readiness-result").text
+        assert "Лук" in text and "Говядина" in text
+        assert "остаток неизвестен" in text
+        assert api(base, "/plans?limit=12")["plans"] == []
+        assert api(base, "/household/history")["event_count"] == 0
+        screenshot(browser, "19-shared-kyrgyz-shopping-unknown-weight")
+
+        Select(browser.find_element(By.ID, "shopping-weight-select")).select_by_value("onion")
+        field = browser.find_element(By.ID, "shopping-weight-amount")
+        field.clear()
+        field.send_keys("0,5")
+        weight_button = browser.find_element(By.ID, "preview-shopping-weight")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            weight_button,
+        )
+        weight_button.click()
+        wait.until(lambda d: len(d.find_elements(
+            By.CSS_SELECTOR, "#shopping-readiness-result li"
+        )) == 1)
+        assert "500 г" in browser.find_element(
+            By.ID, "shopping-readiness-result"
+        ).text
+        assert api(base, "/plans?limit=12")["plans"] == []
+        assert api(base, "/household/history")["event_count"] == 0
+        viewport_check(browser, "shared shopping weight review")
+        screenshot(browser, "20-shared-weight-shopping-readonly")
+        print(
+            "PASS shared shopping: full recipes + weight needs, no fake plans",
+            flush=True,
+        )
+
+
 def main() -> None:
     with mobile_browser() as browser:
         onboarding_wizard(browser)
@@ -624,6 +688,7 @@ def main() -> None:
         reminder_reentry(browser)
         routine_stand_preview(browser)
         recipes_from_home(browser)
+        shared_weighted_shopping_readiness(browser)
     print("MOBILE_UX_SMOKE_OK", flush=True)
 
 

@@ -654,3 +654,12 @@ body.onboarding-open { overflow: hidden; }
 .recipe-meta, .recipe-quote, #recipes-status { color: var(--muted); font-size: .87rem; }
 .recipe-actions { margin-top: 10px; display: grid; gap: 8px; }
 .recipe-actions button { min-height: 44px; scroll-margin-block: 100px; }
+
+.shopping-readiness-inputs { display: grid; gap: 9px; margin-block: 12px; }
+.shopping-readiness-inputs label { font-weight: 650; font-size: .9rem; }
+.shopping-readiness-inputs select, .shopping-readiness-inputs input,
+.shopping-readiness-inputs button { min-width: 0; min-height: 44px; width: 100%; }
+.shopping-readiness-result { margin-block: 8px; overflow-wrap: anywhere; }
+.shopping-readiness-result ul { padding-left: 22px; }
+.shopping-readiness-result li { margin-block: 6px; }
+.shopping-readiness-result p, #shopping-readiness-status { color: var(--muted); font-size: .87rem; }

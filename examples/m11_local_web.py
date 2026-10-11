@@ -29,6 +29,8 @@ from household_supply.application import (
     UsualBasketPlanCommitService,
 )
 from household_supply.application.recipe_commit import RecipePlanCommitService
+from household_supply.application.shopping_readiness import ShoppingReadinessService
+from household_supply.web.shopping_readiness_api import ShoppingReadinessWebApi
 from household_supply.domain import (
     CatalogBinding,
     CatalogSnapshot,
@@ -145,6 +147,9 @@ def _build_web_app(
     )
     web_api = HouseholdWebJsonApi(
         closed_loop, catalog, reset_service,
+        shopping_readiness_api=ShoppingReadinessWebApi(
+            ShoppingReadinessService(household, catalog, clock=utc_now)
+        ),
         weighted_api=(
             None if weighted_prices is None
             else WeightedReferenceWebApi(weighted_prices)

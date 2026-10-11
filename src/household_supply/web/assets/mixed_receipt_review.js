@@ -225,7 +225,7 @@
       setStatus("Введите ID сохранённого смешанного плана формата mp-…", true);
       return;
     }
-    ++revision;
+    const loadRevision = ++revision;
     plan = null;
     planId = null;
     reviewed = null;
@@ -240,6 +240,9 @@
       ]);
       if (saved.plan.plan_id !== id || status.plan_id !== id) {
         throw new Error("Идентификатор плана в ответе не совпадает.");
+      }
+      if (loadRevision !== revision || by("mixed-receipt-plan-id").value.trim() !== id) {
+        return; // Plan ID changed while fetching; discard the stale reply.
       }
       plan = saved.plan;
       planId = id;

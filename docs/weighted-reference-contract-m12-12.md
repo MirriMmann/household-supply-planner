@@ -53,6 +53,11 @@ A successful observation returns:
 }
 ```
 
+The live local web stand also exposes a compact **«Товары на вес —
+справочный расчёт»** panel: pick one of the verified product identities,
+enter the desired kilograms and review the source-linked estimate. This panel
+does not offer a Save/Buy control and is hidden in the offline-only demo.
+
 This endpoint rejects unknown Items, floats and incompatible units. It does
 not let a client submit its own authoritative price. No model-generated
 price enters purchase planning. The local three-Item offline demo keeps this

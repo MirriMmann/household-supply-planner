@@ -605,6 +605,7 @@ class MixedReceiptService:
                 discount=discount, total_paid=total_paid,
                 price_changes_approved=price_changes_approved,
             )
+            at = new.recorded_at
             receipt = self.receipts.claim(new)
             self._validate(plan, receipt)
             events = self._events(plan, receipt)

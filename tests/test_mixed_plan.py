@@ -527,3 +527,38 @@ def test_mixed_receipt_api_guarded_and_has_no_live_globus_access(tmp_path):
     assert api.handle("POST", route + "?mutation=1", payload).status == 400
     assert app.api.handle("GET", "/plans?limit=10").body["plans"] == []
     assert app.api.handle("GET", "/household/history").body["event_count"] == 4
+
+
+def test_mixed_receipt_can_fully_cover_need_with_exact_received_mass(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    receipt = _actual(
+        plan, mass="300", onion_paid="15",
+        fees="0", discount="0", total="110", approved=False,
+    )
+    status = service.confirm(**receipt)
+    assert status["state"] == "completed"
+    assert status["all_demands_fulfilled"] is True
+    assert all(x["fulfilled"] for x in status["fulfillment"])
+    assert all(
+        x["still_missing_after_receipt"]["amount"] == "0"
+        for x in status["fulfillment"]
+    )
+
+
+def test_receipt_discount_and_delivery_are_accounted_to_paid_total(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    receipt = _actual(
+        plan, fees="1", discount="0.5", total="110", approved=True,
+    )
+    status = service.confirm(**receipt)
+    assert status["state"] == "completed"
+    assert status["receipt"]["delivery_and_fees"] == {
+        "amount": "1", "currency": "KGS"
+    }
+    assert status["receipt"]["discount"] == {
+        "amount": "0.5", "currency": "KGS"
+    }
+    assert status["receipt"]["total_paid"] == {
+        "amount": "110", "currency": "KGS"
+    }
+    assert len(service.household.history().events) == 4

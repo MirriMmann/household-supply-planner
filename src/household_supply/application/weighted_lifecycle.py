@@ -209,6 +209,40 @@ class WeightedReceipt:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WeightedCompletionClaim:
+    """Create-only plan-level CAS, preventing two event IDs across processes."""
+
+    plan_id: PlanId
+    event_id: HouseholdEventId
+    confirmation_hash: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.confirmation_hash, str)
+            or len(self.confirmation_hash) != 64
+            or any(x not in "0123456789abcdef" for x in self.confirmation_hash)
+        ):
+            raise WeightedProcurementError("invalid weighted receipt confirmation fingerprint")
+
+    def to_mapping(self) -> dict:
+        return {
+            "plan_id": self.plan_id.value, "event_id": self.event_id.value,
+            "confirmation_hash": self.confirmation_hash,
+        }
+
+    @classmethod
+    def from_mapping(cls, data: dict) -> WeightedCompletionClaim:
+        if not isinstance(data, dict) or set(data) != {
+            "plan_id", "event_id", "confirmation_hash",
+        }:
+            raise ValueError("weighted claim schema mismatch")
+        return cls(
+            PlanId(data["plan_id"]), HouseholdEventId(data["event_id"]),
+            data["confirmation_hash"],
+        )
+
+
 class FileWeightedPlanRepository:
     """Create-only snapshots; SHA integrity and typed re-validation on every read."""
 
@@ -217,9 +251,12 @@ class FileWeightedPlanRepository:
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "plans").mkdir(exist_ok=True)
         (self.root / "receipts").mkdir(exist_ok=True)
+        (self.root / "completions").mkdir(exist_ok=True)
 
     @staticmethod
-    def _payload(record: WeightedPlanRecord | WeightedReceipt) -> bytes:
+    def _payload(
+        record: WeightedPlanRecord | WeightedReceipt | WeightedCompletionClaim
+    ) -> bytes:
         body = {"schema_version": 1, "body": record.to_mapping()}
         source = json.dumps(body, ensure_ascii=False, sort_keys=True,
                             separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -228,7 +265,7 @@ class FileWeightedPlanRepository:
                            separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
 
     def _path(self, kind: str, key: str) -> Path:
-        if kind not in {"plans", "receipts"}:
+        if kind not in {"plans", "receipts", "completions"}:
             raise ValueError("unsupported weighted record kind")
         return self.root / kind / f"{key}.json"
 
@@ -259,7 +296,9 @@ class FileWeightedPlanRepository:
             if sha256(canonical).hexdigest() != obj["digest"]:
                 raise ValueError("weighted record integrity mismatch")
             record = cls.from_mapping(obj["body"])
-            identity = record.plan_id.value if kind == "plans" else record.event_id.value
+            identity = (
+                record.event_id.value if kind == "receipts" else record.plan_id.value
+            )
             if identity != key:
                 raise ValueError("weighted filename identity mismatch")
             return record
@@ -273,6 +312,25 @@ class FileWeightedPlanRepository:
 
     def get_receipt(self, event_id: HouseholdEventId) -> WeightedReceipt | None:
         return self._get("receipts", event_id.value, WeightedReceipt)
+
+    def get_completion(self, plan_id: PlanId) -> WeightedCompletionClaim | None:
+        return self._get("completions", plan_id.value, WeightedCompletionClaim)
+
+    def claim_completion(self, claim: WeightedCompletionClaim) -> None:
+        """Atomic, plan-keyed create-only claim; same payload is retriable."""
+        existing = self.get_completion(claim.plan_id)
+        if existing is not None:
+            if existing != claim:
+                raise WeightedProcurementConflict(
+                    "weighted plan already claimed by another purchase"
+                )
+            return
+        try:
+            self._save("completions", claim.plan_id.value, claim)
+        except WeightedProcurementConflict:
+            raced = self.get_completion(claim.plan_id)
+            if raced != claim:
+                raise
 
     def _save(self, kind: str, key: str, record) -> None:
         target = self._path(kind, key)
@@ -440,7 +498,8 @@ class WeightedProcurementService:
                 "actual_cost": _money(actual_cost), "receipt_ref": receipt_ref,
             }
             basis = json.dumps(receipt_basis, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            source = f"weighted-plan:{plan_id.value}:" + sha256(basis).hexdigest()
+            receipt_hash = sha256(basis).hexdigest()
+            source = f"weighted-plan:{plan_id.value}:" + receipt_hash
             # At most one completed purchase for this immutable single-line
             # weighted plan. Check household events rather than just receipt
             # files: event append can succeed before receipt persistence.
@@ -455,6 +514,12 @@ class WeightedProcurementService:
                     raise WeightedProcurementConflict(
                         "weighted plan already has another completed purchase"
                     )
+            # Cross-process CAS must occur before household event persistence.
+            # A crash after this claim can be retried only with identical
+            # receipt data and event ID; another completion fails closed.
+            self.repository.claim_completion(
+                WeightedCompletionClaim(plan_id, event_id, receipt_hash)
+            )
             existing = self.household.repository.get(event_id)
             if existing is not None:
                 if not isinstance(existing, PurchaseEvent) or (

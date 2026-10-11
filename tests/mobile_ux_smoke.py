@@ -804,6 +804,29 @@ def mixed_receipt_review_mobile(browser) -> None:
         viewport_check(browser, "private receipt review before purchase")
         screenshot(browser, "21-mixed-receipt-validated-uncommitted")
 
+        # Any edit after server review must invalidate authorization, even if
+        # the operator subsequently restores the original receipt value.
+        reference = browser.find_element(By.ID, "mixed-receipt-ref")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reference,
+        )
+        reference.send_keys("-draft-change")
+        assert browser.find_element(By.ID, "mixed-receipt-reviewed").get_attribute("hidden")
+        assert not confirm.is_enabled()
+        reference.clear()
+        reference.send_keys("operator-mobile-receipt-001")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview,
+        )
+        preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-reviewed"
+        ).get_attribute("hidden"))
+        assert not confirm.is_enabled()
+        assert api(base, "/household/history")["event_count"] == 2
+
         consent = browser.find_element(By.ID, "mixed-receipt-final-consent")
         browser.execute_script(
             "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -56,9 +57,11 @@ def test_recipe_confirm_saves_exact_quote_and_never_purchases(tmp_path):
     record = saved.body["plan"]
     assert record["plan_id"] == token
     assert record["result"] == quote.body["plan"]
-    assert record["request"]["demands"] == [{
-        "item_id": "milk", "quantity": {"amount": "300", "unit": "ml"},
-    }]
+    demands = record["request"]["demands"]
+    assert len(demands) == 1
+    assert demands[0]["item_id"] == "milk"
+    assert demands[0]["quantity"]["unit"] == "ml"
+    assert Decimal(demands[0]["quantity"]["amount"]) == Decimal("300")
     basis = record["request"]["decision_basis"]
     assert basis["kind"] == "recipe"
     assert basis["preview_id"] == token

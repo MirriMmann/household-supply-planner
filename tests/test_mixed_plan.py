@@ -379,7 +379,8 @@ def test_mixed_receipt_rejects_uncounted_or_unapproved_overpriced_delivery(tmp_p
     app, plan, service = _receipt_runtime(tmp_path)
     prior = len(service.household.history().events)
     cases = [
-        ({"lines": _actual(plan)["lines"][:1]}, "every planned Item"),
+        ({"lines": _actual(plan)["lines"][:1],
+          "total_paid": Money("15", "KGS")}, "every planned Item"),
         ({"lines": _actual(plan)["lines"] + _actual(plan)["lines"][:1]}, "unique"),
         ({"lines": (
             MixedActualLine("onion", "weighted", "", None, Quantity("301", "g"),
@@ -424,9 +425,14 @@ def test_receipt_one_plan_claim_rejects_changed_payment_reference(tmp_path):
     service.confirm(**receipt)
     with pytest.raises(MixedReceiptConflict, match="different receipt"):
         service.confirm(**dict(receipt, receipt_ref="invoice:replacement"))
+    alternate = dict(receipt)
+    alternate["lines"] = (
+        MixedActualLine("onion", "weighted", "", None,
+                        Quantity("280", "g"), Money("14.5", "KGS")),
+        receipt["lines"][1],
+    )
     with pytest.raises(MixedReceiptConflict, match="different receipt"):
-        service.confirm(**dict(receipt, total_paid=Money("109", "KGS"),
-                                      delivery_and_fees=Money("-0.5", "KGS")))
+        service.confirm(**alternate)
     assert len(service.household.history().events) == 4
 
 

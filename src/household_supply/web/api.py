@@ -13,6 +13,9 @@ from household_supply.application import (
     LocalDataResetService,
 )
 from household_supply.domain import CatalogSnapshot
+from household_supply.market.catalogs.globus_weight_candidates import (
+    serialize_weight_candidates,
+)
 
 from .usual_basket_api import UsualBasketWebApi
 
@@ -184,6 +187,19 @@ class HouseholdWebJsonApi:
             if self.usual_basket_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.usual_basket_api.handle(method, path, payload)
+
+        if target.path == "/catalog/weighted-candidates":
+            if target.query:
+                return JsonApiResponse(400, {"error": "invalid_query"})
+            if normalized_method != "GET":
+                return JsonApiResponse(405, {"error": "method_not_allowed"})
+            return JsonApiResponse(200, {
+                "candidates": list(serialize_weight_candidates()),
+                "notice": (
+                    "Весовые позиции приведены только для исследования рынка. "
+                    "HSM пока не может создавать из них закупки или утверждать актуальную цену."
+                ),
+            })
 
         if target.path == "/catalog":
             if target.query:

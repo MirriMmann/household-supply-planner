@@ -157,7 +157,7 @@ def test_package_metadata_is_explicit_in_sku_name() -> None:
         "kg": ("кг",),
         "ml": ("мл",),
         "l": ("л",),
-        "piece": ("шт",),
+        "piece": ("шт", "рул"),
         "pieces": ("шт",),
         "pcs": ("шт",),
     }

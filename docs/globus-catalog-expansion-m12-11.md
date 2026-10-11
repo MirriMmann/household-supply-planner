@@ -5,10 +5,10 @@ Verified against the public **addressless demo catalog** of Globus Online on
 live inventory availability or a future price. Prices remain fetched on demand
 by the bounded M5 market provider and stored as market evidence at planning time.
 
-## Packaged goods: planner-compatible, 15 new SKUs / 9 new Item identities
+## Packaged goods: planner-compatible, 29 new SKUs / 18 new Item identities
 
 The existing curated catalog goes from **61 SKUs / 27 Items** to
-**76 SKUs / 36 Items**, without changing the legacy inventory, plan or market
+**90 SKUs / 45 Items**, without changing the legacy inventory, plan or market
 contract. These represent fixed, explicitly labeled package quantities,
 not fractions inferred from the retailer's price display.
 
@@ -23,6 +23,21 @@ not fractions inferred from the retailer's price display.
 | `vinegar_9_percent` | [UNIDAN 500мл 9%](https://globus-online.kg/ru-kg/good/2eb1183b2f2b4e6a802c593da9387386000300010001) |
 | `breadcrumbs` | [Русский Аппетит 200г](https://globus-online.kg/ru-kg/good/85ac4327bcc841ea9cfe87c5a3836a20000200010001) |
 | `pepper_blend` | [Пряно смесь перцев 15г](https://globus-online.kg/ru-kg/good/3cfe46c19cd942e594153a8fc7b86e90000100010000) |
+| `dishwashing_liquid` | [Fairy ромашка 450мл](https://globus-online.kg/ru-kg/good/3635656d8201496d9c6ffd6a1cb2d412000100010000), [AOS Алоэ 450мл](https://globus-online.kg/ru-kg/good/52343c9e85394e839825b734a88aeeb9000300010001) |
+| `toothpaste` | [Splat Sensitive 100мл](https://globus-online.kg/ru-kg/good/13a88ad22c754b70bf0d560c9f2d2116000100010000), [Splat Лечебные травы 100мл](https://globus-online.kg/ru-kg/good/9e36e0639469424d86d7f002cd27a524000100010000) |
+| `liquid_hand_soap` | [Esviro 500мл](https://globus-online.kg/ru-kg/good/a4a16e870b0a43a4b411a6d351e79438000200010001) |
+| `dish_sponge` | [№1 1шт](https://globus-online.kg/ru-kg/good/c03c0cf3fee540f39c192b359b76c616000200010001), [Dora Forte 7шт](https://globus-online.kg/ru-kg/good/89131f073bff41a3baab4b46e3c40db0000100010000) |
+| `toilet_paper_roll` | [№1 4 рулона](https://globus-online.kg/ru-kg/good/1aec5b97061a4ebf9349a8c5eadd92a1000200010000), [Pero Rose 8 рулонов](https://globus-online.kg/ru-kg/good/1edb740495f742fa9c4ce0c28e359d5d000300010001) |
+| `trash_bag_30l` | [№1 30л, 20шт](https://globus-online.kg/ru-kg/good/c1806278afdc4d73875258de6a1e8454000200010001) |
+| `trash_bag_60l` | [№1 60л, 20шт](https://globus-online.kg/ru-kg/good/31d587634dd546149216660d63ec614d000200010001) |
+| `laundry_powder_color` | [Persil для цветного 3кг](https://globus-online.kg/ru-kg/good/ca5bd88e607c45329fcf307276d1795f000300010001) |
+| `shampoo` | [Garnier Fructis 400мл](https://globus-online.kg/ru-kg/good/f7e6d9949ef44206be4ead1c51d4beef000100010000), [Likato Recovery 400мл](https://globus-online.kg/ru-kg/good/dc3d18d7892a4d01b7b649b0798d0c09000200010001) |
+
+`toilet_paper_roll` tracks **individual rolls** even though an offer sells a
+fixed 4- or 8-roll bundle. `dish_sponge` tracks individual sponges, while
+trash bags are split by capacity (30l vs 60l) to prevent silent use of the
+wrong size. These are explicit package quantities, never a claim that the
+retailer sells each internal unit separately.
 
 `pepper_blend` is NOT `black_pepper`; `tomato_paste` is NOT fresh
 `tomato`, canned corn is not fresh corn, and vinegar 9% is not vinegar 5%.

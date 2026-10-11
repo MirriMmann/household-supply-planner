@@ -8,12 +8,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 import json
 
 import pytest
 
-from household_supply.application.persistence import PlanId
 from household_supply.application.weighted_lifecycle import (
     FileWeightedPlanRepository, WeightedProcurementConflict,
     WeightedProcurementError, WeightedProcurementService, WeightedStorageError,
@@ -27,6 +25,8 @@ from household_supply.household import (
 from household_supply.market.catalogs.globus_weight_candidates import WEIGHT_CANDIDATES
 from household_supply.market.providers.globus_online import HttpTextResponse
 from household_supply.market.providers.globus_weight import GlobusWeightPriceService
+from household_supply.web.weighted_procurement_api import WeightedProcurementWebApi
+from examples.m11_local_web import build_demo_app
 
 
 NOW = datetime(2026, 10, 11, 12, tzinfo=timezone.utc)
@@ -190,3 +190,60 @@ def test_preview_is_not_restartable_without_explicit_save(tmp_path):
     with pytest.raises(WeightedProcurementConflict, match="no verified weighted preview"):
         restarted.save_plan(p.record.plan_id)
     assert restarted.repository.get_plan(p.record.plan_id) is None
+
+
+def test_opt_in_http_requires_explicit_preview_save_and_real_receipt(tmp_path):
+    app = build_demo_app(tmp_path)
+    service, transport, _ = _runtime(tmp_path)
+    # Share the same event store as the normal HSM household operations API.
+    service.household = app.api.api.operations.household
+    from dataclasses import replace
+
+    api = replace(
+        app.api, weighted_procurement_api=WeightedProcurementWebApi(service)
+    )
+    assert app.api.handle("POST", "/weighted/plans/preview", {}).status == 404
+    initial = api.handle("GET", "/household/state").body
+
+    preview = api.handle("POST", "/weighted/plans/preview", {
+        "item_id": "onion",
+        "quantity": {"amount": "350", "unit": "g"},
+        "budget": {"amount": "25", "currency": "KGS"},
+    })
+    assert preview.status == 200, preview.body
+    plan_id = preview.body["plan"]["plan_id"]
+    assert preview.body["persisted"] is False
+    assert preview.body["plan"]["sellable"] == {"amount": "400", "unit": "g"}
+    assert api.handle("GET", f"/weighted/plans/{plan_id}").status == 404
+    assert api.handle("GET", "/household/state").body == initial
+
+    saved = api.handle("POST", "/weighted/plans/confirm", {"plan_id": plan_id})
+    assert saved.status == 201, saved.body
+    assert saved.body["persisted"] is True
+    assert api.handle("GET", f"/weighted/plans/{plan_id}").status == 200
+    assert api.handle("GET", "/household/state").body == initial
+
+    purchase = {
+        "event_id": "weight-paid-onion-1",
+        "actual_mass": {"amount": "375", "unit": "g"},
+        "actual_cost": {"amount": "19.50", "currency": "KGS"},
+        "receipt_ref": "receipt:verified-test-1",
+    }
+    result = api.handle("POST", f"/weighted/plans/{plan_id}/purchases", purchase)
+    assert result.status == 201, result.body
+    assert result.body["purchase_confirmed"] is True
+    assert result.body["receipt"]["actual_mass"] == {"amount": "375", "unit": "g"}
+    assert api.handle("GET", "/household/state").body["balances"] == [
+        {"item_id": "onion", "quantity": {"amount": "375", "unit": "g"}}
+    ]
+    assert api.handle("POST", f"/weighted/plans/{plan_id}/purchases", purchase).status == 201
+    assert api.handle("POST", f"/weighted/plans/{plan_id}/purchases", {
+        **purchase, "actual_cost": {"amount": "19.49", "currency": "KGS"},
+    }).status == 409
+    assert api.handle("POST", "/weighted/plans/preview", {
+        "item_id": "onion", "quantity": {"amount": "350", "unit": "g"},
+        "budget": {"amount": "25", "currency": "KGS"},
+        "minimum": {"amount": "100", "unit": "g"},
+    }).status == 422
+    assert api.handle("GET", "/household/history").body["event_count"] == 1
+    assert transport.calls == 1

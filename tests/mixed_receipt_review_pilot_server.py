@@ -42,8 +42,9 @@ class SyntheticGlobusTransport:
         assert url == ONION.source_url
         return HttpTextResponse(
             200, url,
-            "<html><body><h1>Лук репчатый</h1>"
-            "<div>50 сом/кг</div><button>В корзину</button></body></html>",
+            "<html><body><header>Укажите адрес доставки Корзина</header>"
+            "<h1>Лук репчатый фас вес</h1><div>50 сом/кг</div>"
+            "<button>В корзину</button><div>Это демо-каталог</div></body></html>",
         )
 
 

@@ -28,6 +28,7 @@ from household_supply.application import (
     UsualBasketPreparationService,
     UsualBasketPlanCommitService,
 )
+from household_supply.application.recipe_commit import RecipePlanCommitService
 from household_supply.domain import (
     CatalogBinding,
     CatalogSnapshot,
@@ -141,7 +142,10 @@ def _build_web_app(
     )
     web_api = HouseholdWebJsonApi(
         closed_loop, catalog, reset_service,
-        recipe_api=RecipeWebApi(household, planner, clock=utc_now),
+        recipe_api=RecipeWebApi(
+            household, planner, clock=utc_now,
+            confirmation=RecipePlanCommitService(household, lifecycle),
+        ),
         usual_basket_api=UsualBasketWebApi(
             usual_basket, planner,
             confirmation=UsualBasketPlanCommitService(usual_basket, lifecycle),

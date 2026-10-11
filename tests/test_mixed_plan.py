@@ -347,6 +347,14 @@ def test_mixed_receipt_explicit_actual_grams_paid_fee_and_once_only_events(tmp_p
         "amount": "110", "currency": "KGS"
     }
     assert sorted(status["credited_items"]) == ["onion", "rice"]
+    assert status["all_demands_fulfilled"] is False
+    assert status["budget_remaining_after_paid"] == {"amount": "0", "currency": "KGS"}
+    coverage = {row["item_id"]: row for row in status["fulfillment"]}
+    assert coverage["onion"]["required_to_buy"] == {"amount": "300", "unit": "g"}
+    assert coverage["onion"]["actual_received"] == {"amount": "290", "unit": "g"}
+    assert coverage["onion"]["still_missing_after_receipt"] == {"amount": "10", "unit": "g"}
+    assert coverage["rice"]["still_missing_after_receipt"] == {"amount": "0", "unit": "g"}
+    assert all(x["posted_to_inventory"] for x in status["fulfillment"])
     assert len(service.household.history().events) == before + 2
     state = service.household.state(as_of=datetime.now(timezone.utc))
     assert state.quantity_for("onion") == Quantity("340", "g")

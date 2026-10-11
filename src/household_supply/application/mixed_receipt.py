@@ -538,7 +538,8 @@ class MixedReceiptService:
             # The receipt intent/completion marker are separate and retriable.
             try:
                 self.household.repository.append_batch(
-                    "batch-" + plan_id.value, events
+                    "batch-" + plan_id.value,
+                    tuple(sorted(events, key=lambda event: event.event_id.value)),
                 )
             except HouseholdEventRepositoryError as exc:
                 # A pre-M12.17 interrupted receipt might have already

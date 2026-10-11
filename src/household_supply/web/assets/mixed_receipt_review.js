@@ -375,6 +375,15 @@
       !by("mixed-receipt-retry-consent").checked;
   });
   window.MixedReceiptReview = {
+    openPlan(id) {
+      if (panel.hidden || !/^mp-[a-z0-9_-]{1,64}$/.test(String(id))) return false;
+      if (typeof setView === "function") setView("history");
+      panel.open = true;
+      by("mixed-receipt-plan-id").value = id;
+      by("mixed-receipt-lookup-form").requestSubmit();
+      panel.scrollIntoView({ block: "start", behavior: "smooth" });
+      return true;
+    },
     setEnabled(allowed) {
       panel.hidden = !Boolean(allowed);
       if (!allowed) {

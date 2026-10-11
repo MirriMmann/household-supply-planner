@@ -2040,6 +2040,12 @@ async function loadWeightCandidates() {
   window.MixedReceiptReview?.setEnabled(
     Boolean(data.mixed_receipt_review_enabled)
   );
+  window.MixedShoppingWorkflow?.configure({
+    catalog: state.catalog, candidates: state.weightCandidates,
+  });
+  window.MixedShoppingWorkflow?.setEnabled(
+    Boolean(data.mixed_plan_enabled && data.mixed_receipt_review_enabled)
+  );
   const panel = byId("weighted-panel");
   panel.classList.toggle("hidden", !data.estimate_supported || !state.weightCandidates.length);
   const select = byId("weighted-item");
@@ -2106,6 +2112,7 @@ async function submitWeightEstimate(event) {
 async function loadShoppingRecipeCandidates() {
   const data = await request("/shopping/recipe-candidates");
   state.shoppingRecipeCandidates = data.recipes || [];
+  window.MixedShoppingWorkflow?.setRecipes(state.shoppingRecipeCandidates);
   const select = byId("shopping-recipe-select");
   select.replaceChildren();
   for (const recipe of state.shoppingRecipeCandidates) {

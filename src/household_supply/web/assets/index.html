@@ -64,6 +64,49 @@
         <p id="shopping-readiness-status" aria-live="polite"></p>
         <div id="shopping-readiness-result" class="shopping-readiness-result"></div>
         <p class="human-note">Если среди недостающих товаров есть весовые позиции без подтверждённого шага продажи, полноценный план заблокирован. Для фасованных товаров используйте обычный расчёт ниже.</p>
+        <button id="shopping-to-mixed-recipe" class="secondary-button" type="button" hidden>Продолжить с выбранным блюдом в закрытом пилоте</button>
+      </details>
+
+      <details class="secondary-operation mixed-shopping-panel" id="mixed-shopping-panel" hidden>
+        <summary>Единая закупка: рецепты, упаковки и вес — закрытый пилот</summary>
+        <p class="human-note">Создание плана доступно только при отдельно проверенных правилах продажи весовых товаров. Публичная цена Globus за кг сама по себе недостаточна. Это список будущей покупки, не заказ у магазина.</p>
+        <form id="mixed-shopping-form" class="mixed-shopping-fields">
+          <fieldset class="mixed-shopping-source">
+            <legend>Что требуется купить?</legend>
+            <label><input type="radio" name="mixed-shopping-source" value="recipe" checked> Ингредиенты блюда</label>
+            <label><input type="radio" name="mixed-shopping-source" value="manual"> Мой набор продуктов</label>
+          </fieldset>
+          <div id="mixed-shopping-recipe-input">
+            <label for="mixed-shopping-recipe">Блюдо</label>
+            <select id="mixed-shopping-recipe"></select>
+          </div>
+          <div id="mixed-shopping-manual-input" hidden>
+            <div id="mixed-shopping-demands" class="mixed-shopping-demands"></div>
+            <button class="secondary-button" type="button" id="mixed-shopping-add-item">Добавить продукт</button>
+          </div>
+          <label for="mixed-shopping-budget">Максимальный бюджет на товары (сом), без неизвестной доставки</label>
+          <input id="mixed-shopping-budget" type="text" inputmode="decimal" value="1000" required>
+          <button class="secondary-button" type="submit" id="mixed-shopping-preview">Рассчитать весь смешанный план</button>
+        </form>
+        <p id="mixed-shopping-status" aria-live="polite"></p>
+        <div id="mixed-shopping-result" hidden>
+          <div id="mixed-shopping-lines"></div>
+          <label class="mixed-shopping-consent">
+            <input id="mixed-shopping-consent" type="checkbox">
+            <span>Я проверил весь состав и бюджет. Сохранить план покупок без оформления заказа и без изменения домашних запасов.</span>
+          </label>
+          <button id="mixed-shopping-save" type="button" class="primary-button" disabled>Сохранить смешанный план</button>
+        </div>
+        <div id="mixed-shopping-saved" hidden>
+          <p id="mixed-shopping-saved-info"></p>
+          <button class="secondary-button" type="button" id="mixed-shopping-open-receipt">После покупки сверить фактический чек</button>
+        </div>
+        <form id="mixed-shopping-lookup-form" class="mixed-shopping-fields">
+          <label for="mixed-shopping-lookup-id">Уже сохраняли смешанный план? Откройте его по ID</label>
+          <input id="mixed-shopping-lookup-id" type="text" maxlength="80" autocomplete="off" placeholder="mp-...">
+          <button class="secondary-button" type="submit" id="mixed-shopping-lookup">Открыть сохранённый план</button>
+        </form>
+        <p class="human-note">Изменение бюджета или ингредиентов после расчёта отменяет подтверждение. Записать покупку в домашние запасы можно только после отдельной сверки фактического чека.</p>
       </details>
 
       <details class="secondary-operation recipes-panel" id="recipes-panel">
@@ -377,6 +420,7 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/mixed_receipt_review.js" defer></script>
+  <script src="/assets/mixed_shopping_workflow.js" defer></script>
   <script src="/assets/reset.js" defer></script>
 </body>
 </html>

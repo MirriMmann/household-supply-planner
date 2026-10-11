@@ -207,6 +207,7 @@ class HouseholdWebJsonApi:
                 return JsonApiResponse(405, {"error": "method_not_allowed"})
             return JsonApiResponse(200, {
                 "candidates": list(serialize_weight_candidates()),
+                "estimate_supported": self.weighted_api is not None,
                 "notice": (
                     "Весовые позиции приведены только для исследования рынка. "
                     "HSM пока не может создавать из них закупки или утверждать актуальную цену."

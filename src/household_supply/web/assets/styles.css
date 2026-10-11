@@ -707,3 +707,43 @@ body.onboarding-open { overflow: hidden; }
 @media (min-width: 760px) {
   .mixed-receipt-lines { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* M12.19 mixed shopping: only rendered when the private plan AND receipt
+   capabilities have been explicitly installed. No seller checkout implied. */
+.mixed-shopping-panel[hidden],
+.mixed-shopping-panel [hidden] { display: none !important; }
+#shopping-to-mixed-recipe[hidden] { display: none !important; }
+.mixed-shopping-panel { margin-block: 16px 24px; }
+.mixed-shopping-fields, .mixed-shopping-demands {
+  display: grid; gap: 12px; margin-block: 14px;
+}
+.mixed-shopping-fields > label { font-size: .9rem; font-weight: 600; }
+.mixed-shopping-fields input:not([type="radio"]):not([type="checkbox"]),
+.mixed-shopping-fields select,
+.mixed-shopping-demand-row input,
+.mixed-shopping-demand-row select {
+  min-height: 44px; width: 100%; max-width: 100%; box-sizing: border-box;
+}
+.mixed-shopping-source { border: 0; padding: 0; display: flex; gap: 12px;
+  flex-wrap: wrap; min-width: 0; }
+.mixed-shopping-source legend { font-weight: 600; margin-bottom: 10px; }
+.mixed-shopping-source label { display: inline-flex; gap: 8px; align-items: center; }
+.mixed-shopping-demand-row { display: grid; grid-template-columns: minmax(0, 1fr) 75px 80px;
+  gap: 8px; border: 1px solid var(--line, #d8dcdd); padding: 12px;
+  border-radius: 12px; }
+.mixed-shopping-demand-row button { grid-column: 1 / -1; justify-self: start; }
+.mixed-shopping-line { border: 1px solid var(--line, #d8dcdd);
+  border-radius: 12px; padding: 12px; margin-block: 8px; overflow-wrap: anywhere; }
+.mixed-shopping-line p { margin-block: 6px; font-size: .9rem; }
+.mixed-shopping-consent { display: flex; gap: 10px; padding: 12px;
+  border-radius: 9px; background: var(--surface-soft, #f4f6f7); }
+.mixed-shopping-consent > input { width: 21px; height: 21px; min-height: 21px;
+  flex: 0 0 auto; margin: 1px 0 0; }
+#mixed-shopping-result, #mixed-shopping-saved { margin-block: 16px; }
+#mixed-shopping-status.error { color: #ab2433; }
+#mixed-shopping-preview, #mixed-shopping-save, #mixed-shopping-open-receipt {
+  width: 100%; min-height: 44px;
+}
+@media (max-width: 360px) {
+  .mixed-shopping-demand-row { grid-template-columns: minmax(0, 1fr) 65px 65px; gap: 5px; }
+}

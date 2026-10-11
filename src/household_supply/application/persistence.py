@@ -96,11 +96,122 @@ def _require_quantity_snapshot(value: Any, *, label: str) -> None:
     _require_nonempty_string(value["unit"], label=f"{label}.unit")
 
 
+def _require_recipe_decision_basis(value: Mapping[str, Any]) -> None:
+    """Strict persisted provenance for explicitly confirmed recipe shortages."""
+    label = "plan request recipe decision_basis"
+    _require_snapshot_schema(
+        value, label=label,
+        required={
+            "kind", "as_of", "preview_id", "recipe_id", "recipe_name",
+            "servings", "household_event_ids", "ingredients",
+            "explicit_needs", "contributions",
+        },
+    )
+    preview_id = _require_nonempty_string(value["preview_id"], label=f"{label}.preview_id")
+    if not preview_id.startswith("rc-"):
+        raise ValueError(f"{label}.preview_id must have rc- prefix")
+    recipe_id = _require_nonempty_string(value["recipe_id"], label=f"{label}.recipe_id")
+    _require_nonempty_string(value["recipe_name"], label=f"{label}.recipe_name")
+    _require_decimal_string(value["servings"], label=f"{label}.servings", positive=True)
+    as_of = _require_nonempty_string(value["as_of"], label=f"{label}.as_of")
+    try:
+        parsed = datetime.fromisoformat(as_of)
+    except ValueError as exc:
+        raise ValueError(f"{label}.as_of must be an ISO datetime") from exc
+    _require_aware(parsed, label=f"{label}.as_of")
+
+    event_ids = value["household_event_ids"]
+    if not isinstance(event_ids, list) or any(
+        not isinstance(x, str) or not x for x in event_ids
+    ) or len(event_ids) != len(set(event_ids)):
+        raise ValueError(f"{label}.household_event_ids must be unique strings")
+
+    ingredients = value["ingredients"]
+    if not isinstance(ingredients, list) or not ingredients:
+        raise ValueError(f"{label}.ingredients must be a non-empty array")
+    missing_by_id: dict[str, dict] = {}
+    ingredient_ids: list[str] = []
+    for index, ingredient in enumerate(ingredients):
+        entry_label = f"{label}.ingredients[{index}]"
+        if not isinstance(ingredient, Mapping):
+            raise ValueError(f"{entry_label} must be an object")
+        _require_snapshot_schema(
+            ingredient, label=entry_label,
+            required={"item_id", "required", "recorded_on_hand", "missing"},
+        )
+        item_id = _require_nonempty_string(
+            ingredient["item_id"], label=f"{entry_label}.item_id"
+        )
+        ingredient_ids.append(item_id)
+        for key in ("required", "recorded_on_hand", "missing"):
+            _require_quantity_snapshot(ingredient[key], label=f"{entry_label}.{key}")
+        required = ingredient["required"]
+        recorded = ingredient["recorded_on_hand"]
+        missing = ingredient["missing"]
+        if len({required["unit"], recorded["unit"], missing["unit"]}) != 1:
+            raise ValueError(f"{entry_label} incompatible units")
+        required_amount = Decimal(required["amount"])
+        recorded_amount = Decimal(recorded["amount"])
+        missing_amount = Decimal(missing["amount"])
+        if required_amount <= 0 or recorded_amount < 0 or missing_amount < 0:
+            raise ValueError(f"{entry_label} invalid ingredient quantities")
+        if missing_amount != max(Decimal(0), required_amount - recorded_amount):
+            raise ValueError(f"{entry_label} deficit does not match recorded stock")
+        if missing_amount > 0:
+            missing_by_id[item_id] = dict(missing)
+    if ingredient_ids != sorted(set(ingredient_ids)):
+        raise ValueError(f"{label}.ingredients must be canonical and unique")
+    if not missing_by_id:
+        raise ValueError(f"{label} needs at least one recorded shortfall")
+
+    needs = value["explicit_needs"]
+    contributions = value["contributions"]
+    if not isinstance(needs, list) or not isinstance(contributions, list):
+        raise ValueError(f"{label}.explicit_needs and contributions must be arrays")
+    seen_needs: dict[str, dict] = {}
+    for entry in needs:
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{label}.explicit_needs must contain objects")
+        _require_snapshot_schema(
+            entry, label=f"{label}.explicit_needs entry",
+            required={"item_id", "quantity"},
+        )
+        item_id = _require_nonempty_string(entry["item_id"], label=f"{label}.item_id")
+        if item_id in seen_needs:
+            raise ValueError(f"{label} duplicate explicit need")
+        _require_quantity_snapshot(entry["quantity"], label=f"{label}.quantity")
+        seen_needs[item_id] = dict(entry["quantity"])
+    if seen_needs != missing_by_id:
+        raise ValueError(f"{label} explicit needs do not match ingredient deficits")
+
+    seen_contributions: dict[str, dict] = {}
+    for entry in contributions:
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{label}.contributions must contain objects")
+        _require_snapshot_schema(
+            entry, label=f"{label}.contributions entry",
+            required={"source_id", "contribution_id", "item_id", "quantity"},
+        )
+        item_id = _require_nonempty_string(entry["item_id"], label=f"{label}.item_id")
+        if item_id in seen_contributions or (
+            entry["source_id"] != f"recipe:{recipe_id}"
+            or entry["contribution_id"] != f"ingredient:{item_id}"
+        ):
+            raise ValueError(f"{label} invalid recipe contribution identity")
+        _require_quantity_snapshot(entry["quantity"], label=f"{label}.quantity")
+        seen_contributions[item_id] = dict(entry["quantity"])
+    if seen_contributions != missing_by_id:
+        raise ValueError(f"{label} contributions do not match ingredient deficits")
+
+
 def _require_decision_basis(value: Any) -> None:
     label = "plan request decision_basis"
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object")
     kind = value.get("kind")
+    if kind == "recipe":
+        _require_recipe_decision_basis(value)
+        return
     if kind not in {"household_replenishment", "usual_basket"}:
         raise ValueError("unsupported plan decision_basis kind")
     usual = kind == "usual_basket"

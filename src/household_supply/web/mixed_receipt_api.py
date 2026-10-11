@@ -36,6 +36,11 @@ class MixedReceiptWebApi:
             and parts[4:] == ["receipt", "preview"]
         ):
             return parts[3], "preview"
+        if (
+            len(parts) == 6 and parts[:3] == ["", "mixed", "plans"]
+            and parts[4:] == ["receipt", "retry"]
+        ):
+            return parts[3], "retry"
         return None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
@@ -60,6 +65,15 @@ class MixedReceiptWebApi:
             plan_id = PlanId(route[0])
             if verb == "GET":
                 return JsonApiResponse(200, self.service.status(plan_id))
+            if route[1] == "retry":
+                obj = _require_mapping(payload, label="mixed receipt recovery")
+                _require_keys(obj, label="mixed receipt recovery", required={"confirmation"})
+                if obj["confirmation"] != "RETRY":
+                    raise JsonPayloadError("receipt retry must be explicitly confirmed")
+                outcome = self.service.retry_claimed(plan_id)
+                return JsonApiResponse(
+                    201 if outcome["state"] == "completed" else 202, outcome
+                )
             obj = _require_mapping(payload, label="mixed actual receipt")
             _require_keys(obj, label="mixed actual receipt", required={
                 "receipt_ref", "occurred_at", "lines", "delivery_and_fees",

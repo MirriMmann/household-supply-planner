@@ -2,16 +2,8 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from datetime import datetime, timezone
-
-import pytest
-
 from examples.m11_local_web import build_demo_app, build_live_globus_app
 from household_supply.application.kyrgyz_recipes import KYRGYZ_RECIPE_SPECS
-from household_supply.application.shopping_readiness import (
-    ShoppingDemand, ShoppingReadinessError, ShoppingReadinessService,
-)
 from household_supply.domain import Quantity
 
 
@@ -74,6 +66,7 @@ def test_mixed_recipe_never_silently_drops_unknown_meat_or_vegetables(tmp_path):
     assert report["source"] == "recipe"
     assert report["recipe_id"] == "kg-kuurdak-beef"
     assert "inventory_unverified" in report["blockers"]
+    assert "weighted_sale_rule_unverified" in report["blockers"]
     assert all(not x["purchase_authorized"] for x in report["lines"])
     assert api.handle("GET", "/household/history").body["event_count"] == before
     assert api.handle("GET", "/plans?limit=10").body["plans"] == []

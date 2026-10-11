@@ -302,6 +302,7 @@ class HouseholdEventRepository(Protocol):
 class InMemoryHouseholdEventRepository:
     def __init__(self) -> None:
         self._events: dict[HouseholdEventId, HouseholdEvent] = {}
+        self._batches: dict[str, tuple[HouseholdEvent, ...]] = {}
 
     def append(self, event: HouseholdEvent) -> None:
         if event.event_id in self._events:
@@ -317,10 +318,16 @@ class InMemoryHouseholdEventRepository:
         ids = [event.event_id for event in events]
         if not 1 <= len(events) <= 32 or ids != sorted(set(ids)):
             raise HouseholdEventRepositoryError("invalid batch item count/order/identity")
+        existing = self._batches.get(batch_id)
+        if existing is not None:
+            if existing != events:
+                raise HouseholdEventRepositoryError("batch ID already committed with different events")
+            return
         if any(event_id in self._events for event_id in ids):
             raise HouseholdEventRepositoryError("batch contains previously recorded event")
         # Single in-memory operation: cannot expose intermediate membership.
         self._events.update({event.event_id: event for event in events})
+        self._batches[batch_id] = events
 
     def get(self, event_id: HouseholdEventId) -> HouseholdEvent | None:
         return self._events.get(event_id)
@@ -335,6 +342,7 @@ class InMemoryHouseholdEventRepository:
     def clear(self) -> int:
         count = len(self._events)
         self._events.clear()
+        self._batches.clear()
         return count
 
 

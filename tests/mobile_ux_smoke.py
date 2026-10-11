@@ -696,6 +696,23 @@ def shared_weighted_shopping_readiness(browser) -> None:
         assert "остаток неизвестен" in text
         assert api(base, "/plans?limit=12")["plans"] == []
         assert api(base, "/household/history")["event_count"] == 0
+        assert browser.find_element(
+            By.ID, "mixed-shopping-panel"
+        ).get_attribute("hidden")
+        assert browser.find_element(
+            By.ID, "shopping-to-mixed-recipe"
+        ).get_attribute("hidden")
+        try:
+            api(base, "/mixed/plans/preview", {
+                "budget": {"amount": "110", "currency": "KGS"},
+                "demands": [
+                    {"item_id": "onion", "quantity": {"amount": "350", "unit": "g"}},
+                ],
+            })
+        except HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("untrusted offline mode exposed mixed planning")
         screenshot(browser, "19-shared-kyrgyz-shopping-unknown-weight")
 
         Select(browser.find_element(By.ID, "shopping-weight-select")).select_by_value("onion")
@@ -799,6 +816,7 @@ def mixed_receipt_review_mobile(browser) -> None:
         ).get_attribute("hidden"))
         assert "110" in browser.find_element(By.ID, "mixed-shopping-lines").text
         assert api(base, "/household/history")["event_count"] == 2
+        viewport_check(browser, "private mixed shopping preview")
         save_plan = browser.find_element(By.ID, "mixed-shopping-save")
         assert not save_plan.is_enabled()
         screenshot(browser, "21-mixed-shopping-preview-no-inventory")

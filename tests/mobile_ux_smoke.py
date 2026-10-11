@@ -765,15 +765,32 @@ def mixed_receipt_review_mobile(browser) -> None:
         # rather than injecting a previously saved fixture PlanId.
         mixed_panel = browser.find_element(By.ID, "mixed-shopping-panel")
         wait.until(lambda d: not mixed_panel.get_attribute("hidden"))
-        assert not browser.find_element(
-            By.ID, "shopping-to-mixed-recipe"
-        ).get_attribute("hidden")
-        summary = mixed_panel.find_element(By.TAG_NAME, "summary")
+        transfer = browser.find_element(By.ID, "shopping-to-mixed-recipe")
+        assert not transfer.get_attribute("hidden")
+        Select(browser.find_element(By.ID, "shopping-recipe-select")).select_by_value(
+            "kg-kuurdak-beef"
+        )
         browser.execute_script(
             "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
-            summary,
+            transfer,
         )
-        summary.click()
+        transfer.click()
+        assert mixed_panel.get_attribute("open") is not None
+        assert browser.find_element(By.ID, "mixed-shopping-recipe").get_attribute("value") == "kg-kuurdak-beef"
+        # Unknown pantry inventory must block the entire traditional recipe,
+        # rather than producing an incomplete basket of only known SKU lines.
+        blocked_quote = browser.find_element(By.ID, "mixed-shopping-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            blocked_quote,
+        )
+        blocked_quote.click()
+        wait.until(lambda d: "Неполный список не сохраняется" in d.find_element(
+            By.ID, "mixed-shopping-status"
+        ).text)
+        assert browser.find_element(By.ID, "mixed-shopping-result").get_attribute("hidden")
+        assert api(base, "/household/history")["event_count"] == 2
+
         manual = browser.find_element(
             By.CSS_SELECTOR, '#mixed-shopping-panel input[value="manual"]'
         )

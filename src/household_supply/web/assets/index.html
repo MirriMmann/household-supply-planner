@@ -48,6 +48,24 @@
         <button class="secondary-button" id="start-home-setup" type="button">Отметить запасы</button>
       </div>
 
+      <details class="secondary-operation shopping-readiness-panel" id="shopping-readiness-panel">
+        <summary>Общий список потребностей — блюда и весовые товары</summary>
+        <p>Показывает все ингредиенты, включая товары без подтверждённых правил продажи. Неизвестный остаток не считается нулём, а просмотр не сохраняет закупку.</p>
+        <div class="shopping-readiness-inputs">
+          <label for="shopping-recipe-select">Выбранное блюдо</label>
+          <select id="shopping-recipe-select"></select>
+          <button type="button" id="preview-shopping-recipe" class="secondary-button">Проверить ингредиенты блюда</button>
+          <label for="shopping-weight-select">Или отдельный весовой товар</label>
+          <select id="shopping-weight-select"></select>
+          <label for="shopping-weight-amount">Требуемая масса (кг)</label>
+          <input id="shopping-weight-amount" type="text" inputmode="decimal" value="0,5"/>
+          <button type="button" id="preview-shopping-weight" class="secondary-button">Проверить в общем списке</button>
+        </div>
+        <p id="shopping-readiness-status" aria-live="polite"></p>
+        <div id="shopping-readiness-result" class="shopping-readiness-result"></div>
+        <p class="human-note">Если среди недостающих товаров есть весовые позиции без подтверждённого шага продажи, полноценный план заблокирован. Для фасованных товаров используйте обычный расчёт ниже.</p>
+      </details>
+
       <details class="secondary-operation recipes-panel" id="recipes-panel">
         <summary>Что приготовить из того, что есть дома?</summary>
         <p>Рецепты опираются на последние записанные остатки. Если продукт давно не проверяли, уточните количество перед готовкой.</p>

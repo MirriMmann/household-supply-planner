@@ -19,7 +19,7 @@ from household_supply.application.recipe_commit import (
 from household_supply.application.recipe_assessment import (
     RecipeAssessment, assess_recipe, recipe_missing_request,
 )
-from household_supply.application.recipe_catalog import CuratedRecipe, starter_recipe_pack
+from household_supply.application.recipe_catalog import CuratedRecipe, available_recipe_pack
 from household_supply.application.service import ApplicationMarketError, ApplicationPlanner
 from household_supply.domain import Money, Quantity
 from household_supply.household import HouseholdLearningService
@@ -77,7 +77,7 @@ class RecipeWebApi:
         if url.scheme or url.netloc or url.fragment or url.query:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
         method = method.strip().upper()
-        pack = starter_recipe_pack(self.planner.catalog)
+        pack = available_recipe_pack(self.planner.catalog)
         lookup = {entry.recipe.id: entry for entry in pack}
         if url.path == "/recipes":
             if method != "GET":

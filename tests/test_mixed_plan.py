@@ -25,6 +25,7 @@ from household_supply.domain.weighted import VerifiedWeightSaleRule
 from household_supply.market.catalogs.globus_weight_candidates import WEIGHT_CANDIDATES
 from household_supply.market.providers.globus_online import HttpTextResponse
 from household_supply.market.providers.globus_weight import GlobusWeightPriceService
+from household_supply.web.mixed_plan_api import MixedPlanWebApi
 
 
 ONION = next(c for c in WEIGHT_CANDIDATES if c.item_id == "onion")
@@ -214,3 +215,56 @@ def test_weight_only_requested_shopping_can_save_governed_plan(tmp_path):
     assert len(pending.record.weights) == 1
     assert svc.confirm(pending.record.plan_id) == pending.record
     assert app.api.handle("GET", "/household/history").body["event_count"] == 1
+
+
+def test_opt_in_mixed_http_never_appears_in_standard_offline_or_live_app(tmp_path):
+    app, svc, _, _ = runtime(tmp_path)
+    assert app.api.handle("POST", "/mixed/plans/preview", {}).status == 404
+    from dataclasses import replace
+
+    api = replace(app.api, mixed_plan_api=MixedPlanWebApi(svc))
+    with_known_stock(app)
+    body = {
+        "budget": {"amount": "110", "currency": "KGS"},
+        "demands": [
+            {"item_id": "rice", "quantity": {"amount": "200", "unit": "g"}},
+            {"item_id": "onion", "quantity": {"amount": "350", "unit": "g"}},
+        ],
+    }
+    preview = api.handle("POST", "/mixed/plans/preview", body)
+    assert preview.status == 200, preview.body
+    assert preview.body["checkout_confirmed"] is False
+    assert preview.body["persisted"] is False
+    plan_id = preview.body["plan"]["plan_id"]
+    assert len(preview.body["plan"]["packages"]) == 1
+    assert len(preview.body["plan"]["weights"]) == 1
+    assert api.handle("GET", f"/mixed/plans/{plan_id}").status == 404
+    assert api.handle("GET", "/household/history").body["event_count"] == 2
+
+    saved = api.handle("POST", "/mixed/plans/confirm", {"plan_id": plan_id})
+    assert saved.status == 201, saved.body
+    assert saved.body["persisted"]
+    assert saved.body["checkout_confirmed"] is False
+    fetched = api.handle("GET", f"/mixed/plans/{plan_id}")
+    assert fetched.status == 200
+    assert fetched.body["plan"] == saved.body["plan"]
+    assert api.handle("GET", "/household/history").body["event_count"] == 2
+    assert api.handle("GET", "/plans?limit=10").body["plans"] == []
+
+    invalid = dict(body, min_weight={"amount": "1", "unit": "g"})
+    assert api.handle("POST", "/mixed/plans/preview", invalid).status == 422
+    assert api.handle("GET", "/mixed/plans/preview").status == 405
+    assert api.handle("POST", "/mixed/plans/confirm", {
+        "plan_id": plan_id, "checkout": True,
+    }).status == 422
+
+
+def test_source_less_globus_weighted_cart_disallows_live_mixed_plan(tmp_path):
+    from examples.m11_local_web import build_live_globus_app
+    live = build_live_globus_app(tmp_path)
+    metadata = live.api.handle("GET", "/catalog/weighted-candidates")
+    assert metadata.status == 200
+    assert metadata.body["seller_weight_rules_verified"] is False
+    assert metadata.body["mixed_plan_enabled"] is False
+    assert live.api.handle("POST", "/mixed/plans/preview", {}).status == 404
+    assert live.api.handle("POST", "/mixed/plans/confirm", {}).status == 404

@@ -21,6 +21,7 @@ from .usual_basket_api import UsualBasketWebApi
 from .weighted_api import WeightedReferenceWebApi
 from .weighted_procurement_api import WeightedProcurementWebApi
 from .shopping_readiness_api import ShoppingReadinessWebApi
+from .mixed_plan_api import MixedPlanWebApi
 
 
 _MISSING_OFFER_PREFIX = "no available compatible offer can cover required item: "
@@ -151,9 +152,15 @@ class HouseholdWebJsonApi:
     weighted_api: WeightedReferenceWebApi | None = None
     weighted_procurement_api: WeightedProcurementWebApi | None = None
     shopping_readiness_api: ShoppingReadinessWebApi | None = None
+    mixed_plan_api: MixedPlanWebApi | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         target = urlsplit(path)
+        if (
+            self.mixed_plan_api is not None
+            and self.mixed_plan_api.accepts_json_body(method, path)
+        ):
+            return True
         if (
             self.shopping_readiness_api is not None
             and self.shopping_readiness_api.accepts_json_body(method, path)
@@ -199,6 +206,11 @@ class HouseholdWebJsonApi:
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
 
+        if target.path == "/mixed/plans" or target.path.startswith("/mixed/plans/"):
+            if self.mixed_plan_api is None:
+                return JsonApiResponse(404, {"error": "not_found"})
+            return self.mixed_plan_api.handle(method, path, payload)
+
         if target.path == "/shopping/preview" or target.path == "/shopping/recipe-candidates":
             if self.shopping_readiness_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
@@ -232,6 +244,8 @@ class HouseholdWebJsonApi:
             return JsonApiResponse(200, {
                 "candidates": list(serialize_weight_candidates()),
                 "estimate_supported": self.weighted_api is not None,
+                "seller_weight_rules_verified": False,
+                "mixed_plan_enabled": self.mixed_plan_api is not None,
                 "notice": (
                     "Весовые позиции приведены только для исследования рынка. "
                     "HSM пока не может создавать из них закупки или утверждать актуальную цену."

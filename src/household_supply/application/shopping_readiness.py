@@ -164,10 +164,19 @@ class ShoppingReadinessService:
             })
 
         inventory_ready = all(line["stock_status"] == "covered" for line in lines)
-        blockers = sorted({
+        blockers_set = {
             entry["review_status"] for entry in lines
             if entry["review_status"] not in {"already_on_hand", "package_quote_required"}
-        })
+        }
+        # Unknown inventory must not hide other independent blockers.
+        for entry in lines:
+            if entry["stock_status"] == "covered":
+                continue
+            if entry["kind"] == "weighted_reference":
+                blockers_set.add("weighted_sale_rule_unverified")
+            elif entry["kind"] in {"unsupported_units", "unsupported_item"}:
+                blockers_set.add("catalog_unsupported")
+        blockers = sorted(blockers_set)
         return {
             "source": "recipe" if recipe_id is not None else "manual",
             "recipe_id": recipe_id,

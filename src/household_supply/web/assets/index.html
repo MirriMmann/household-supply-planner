@@ -276,6 +276,56 @@
         <p>Здесь можно посмотреть прошлые списки и последние изменения запасов.</p>
       </div>
 
+      <details class="secondary-operation mixed-receipt-panel" id="mixed-receipt-review-panel" hidden>
+        <summary>Сверить фактический чек — закрытый пилот</summary>
+        <p class="human-note">Доступно только в отдельно подключённом пилоте. Чек вводится вручную; приложение не оформляет покупку в Globus и не проверяет подлинность кассового документа.</p>
+        <form id="mixed-receipt-lookup-form" class="mixed-receipt-fields">
+          <label for="mixed-receipt-plan-id">ID ранее сохранённого смешанного плана</label>
+          <input id="mixed-receipt-plan-id" type="text" autocomplete="off" maxlength="80" placeholder="mp-..." required>
+          <button id="mixed-receipt-load" type="submit" class="secondary-button">Открыть план и статус чека</button>
+        </form>
+        <p id="mixed-receipt-status" aria-live="polite"></p>
+        <div id="mixed-receipt-claimed" hidden>
+          <div id="mixed-receipt-claimed-details"></div>
+          <label class="mixed-receipt-consent" id="mixed-receipt-retry-label" hidden>
+            <input id="mixed-receipt-retry-consent" type="checkbox">
+            <span>Я хочу повторить публикацию **этого же** уже сохранённого чека без изменения суммы и количества.</span>
+          </label>
+          <button id="mixed-receipt-retry" class="secondary-button" type="button" hidden disabled>Восстановить учёт по сохранённому чеку</button>
+        </div>
+        <div id="mixed-receipt-editor" hidden>
+          <p id="mixed-receipt-plan-summary"></p>
+          <form id="mixed-receipt-form" class="mixed-receipt-fields">
+            <label for="mixed-receipt-ref">Номер или ссылка на фактический чек</label>
+            <input id="mixed-receipt-ref" type="text" autocomplete="off" maxlength="300" required placeholder="Чек №...">
+            <label for="mixed-receipt-time">Когда фактически получены товары</label>
+            <input id="mixed-receipt-time" type="datetime-local" step="1" required>
+            <h3>Сверка каждого товара</h3>
+            <div id="mixed-receipt-lines" class="mixed-receipt-lines"></div>
+            <label for="mixed-receipt-fees">Доставка и другие сборы (сом)</label>
+            <input id="mixed-receipt-fees" type="text" inputmode="decimal" value="0" required>
+            <label for="mixed-receipt-discount">Скидки (сом)</label>
+            <input id="mixed-receipt-discount" type="text" inputmode="decimal" value="0" required>
+            <label for="mixed-receipt-total">Итоговая сумма по чеку (сом)</label>
+            <input id="mixed-receipt-total" type="text" inputmode="decimal" required>
+            <label class="mixed-receipt-consent">
+              <input id="mixed-receipt-price-approval" type="checkbox">
+              <span>Я отдельно подтверждаю увеличение цен или платные услуги сверх предварительного расчёта (но не превышение бюджета).</span>
+            </label>
+            <button id="mixed-receipt-preview" class="secondary-button" type="submit">Проверить чек без записи запасов</button>
+          </form>
+          <section id="mixed-receipt-reviewed" hidden>
+            <h3>Проверка перед записью</h3>
+            <div id="mixed-receipt-reviewed-details"></div>
+            <label class="mixed-receipt-consent">
+              <input id="mixed-receipt-final-consent" type="checkbox">
+              <span>Я сверил чек и получил указанные товары. Подтверждаю запись фактических количеств в домашние запасы.</span>
+            </label>
+            <button id="mixed-receipt-confirm" class="primary-button" type="button" disabled>Подтвердить получение и обновить запасы</button>
+          </section>
+        </div>
+      </details>
+
       <div class="history-grid">
         <section class="primary-card">
           <div class="simple-heading">
@@ -326,6 +376,7 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="/assets/app.js" defer></script>
+  <script src="/assets/mixed_receipt_review.js" defer></script>
   <script src="/assets/reset.js" defer></script>
 </body>
 </html>

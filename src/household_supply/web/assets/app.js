@@ -2055,7 +2055,7 @@ async function submitWeightEstimate(event) {
   const button = byId("weighted-estimate-button");
   const itemId = byId("weighted-item").value;
   const amount = normalizeNumberInput(byId("weighted-mass").value);
-  if (!/^\\d+(?:\\.\\d+)?$/.test(amount) || !(Number(amount) > 0)) {
+  if (!/^\d+(?:\.\d+)?$/.test(amount) || !(Number(amount) > 0)) {
     result.textContent = "Введите положительную массу в килограммах.";
     return;
   }

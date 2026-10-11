@@ -218,6 +218,7 @@ class HouseholdWebJsonApi:
             and (
                 target.path.endswith("/receipt")
                 or target.path.endswith("/receipt/preview")
+                or target.path.endswith("/receipt/retry")
             )
         ):
             if self.mixed_receipt_api is None:

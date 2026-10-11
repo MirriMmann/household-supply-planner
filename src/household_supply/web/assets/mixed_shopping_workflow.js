@@ -204,7 +204,7 @@
       appendText(card, "strong", `${w.item.name} — весовой товар`);
       appendText(card, "p", `Нужно ${mass(w.requested)}, к продаже ${mass(w.sellable)}; ориентир ${money(w.estimated_upper_bound)}.`);
       appendText(card, "p",
-        `Источник правила в доверенном пилоте: ${w.rule.source_ref}. Минимум ${mass(w.rule.minimum)}, шаг ${mass(w.rule.increment)}, проверено ${w.rule.verified_at}. `);
+        `Идентификатор товара: ${w.rule.source_ref}. Допущенные доверенным пилотом параметры: минимум ${mass(w.rule.minimum)}, шаг ${mass(w.rule.increment)}, отметка проверки ${w.rule.verified_at}. Публичная карточка сама не доказывает эти параметры.`);
       addSource(card, w.observation.source_ref);
     }
     appendText(target, "p",
@@ -310,12 +310,18 @@
       status("Интерфейс сверки чека пока недоступен.", true);
       return;
     }
-    window.MixedReceiptReview.openPlan(saved.plan_id);
+    if (!window.MixedReceiptReview.openPlan(saved.plan_id)) {
+      status("Сверка чека не открылась: сначала проверьте доступ приватного пилота.", true);
+    }
   }
 
   panel.addEventListener("input", (event) => {
-    if (event.target.id === "mixed-shopping-consent" ||
-        by("mixed-shopping-lookup-form").contains(event.target)) return;
+    if (event.target.id === "mixed-shopping-consent") return;
+    if (by("mixed-shopping-lookup-form").contains(event.target)) {
+      saved = null;
+      by("mixed-shopping-saved").hidden = true;
+      return;
+    }
     invalidate();
   });
   panel.addEventListener("change", (event) => {
@@ -353,7 +359,7 @@
       catalog = data.catalog || { items: [], skus: [] };
       weightCandidates = data.candidates || [];
       if (!rows.length) {
-        addManualRow({ item_id: "onion", amount: "0.35", unit: "kg" });
+        addManualRow(); // The operator must choose the needed Item and quantity.
       }
     },
     setRecipes(items) {

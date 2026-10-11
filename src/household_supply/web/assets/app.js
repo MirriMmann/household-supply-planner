@@ -2037,6 +2037,9 @@ async function loadWeightCandidates() {
   const data = await request("/catalog/weighted-candidates");
   state.weightCandidates = data.candidates || [];
   state.weightEstimateSupported = Boolean(data.estimate_supported);
+  window.MixedReceiptReview?.setEnabled(
+    Boolean(data.mixed_receipt_review_enabled)
+  );
   const panel = byId("weighted-panel");
   panel.classList.toggle("hidden", !data.estimate_supported || !state.weightCandidates.length);
   const select = byId("weighted-item");

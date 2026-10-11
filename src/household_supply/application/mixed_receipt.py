@@ -439,12 +439,37 @@ class MixedReceiptService:
         completed = self.receipts.is_completed(receipt)
         if completed and len(credited) != len(events):
             raise MixedReceiptStorageError("completed receipt is missing household events")
+
+        actual_by_item = {line.item_id: line for line in receipt.lines}
+        fulfillment = []
+        for demand in plan.demands:
+            received = actual_by_item[demand.item_id].quantity
+            required = demand.missing
+            if not received.compatible_with(required):
+                raise MixedReceiptStorageError("receipt demand units diverged")
+            shortfall = max(
+                required.base_amount - received.base_amount, 0
+            )
+            fulfillment.append({
+                "item_id": demand.item_id,
+                "required_to_buy": _q(required.as_base()),
+                "actual_received": _q(received.as_base()),
+                "still_missing_after_receipt": _q(
+                    Quantity(shortfall, required.base_unit)
+                ),
+                "fulfilled": shortfall == 0,
+                "posted_to_inventory": demand.item_id in credited,
+            })
         return {
             "plan_id": plan_id.value,
             "state": "completed" if completed else "pending_recovery",
             "receipt": receipt.to_mapping(),
             "credited_items": credited,
             "requires_retry": not completed,
+            "all_demands_fulfilled": all(x["fulfilled"] for x in fulfillment),
+            "fulfillment": fulfillment,
+            "budget_remaining_after_paid": _m(plan.budget - receipt.total_paid),
+            "estimated_merchandise_total": _m(plan.estimated_total),
         }
 
     def confirm(

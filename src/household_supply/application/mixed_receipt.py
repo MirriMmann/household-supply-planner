@@ -465,10 +465,28 @@ class MixedReceiptService:
             _time(occurred_at)
             if occurred_at > at:
                 raise MixedReceiptError("receipt purchase time cannot be in the future")
+            # Exact equivalence: 0.29kg == 290g and 14.50 KGS ==
+            # 14.5 KGS must replay the same immutable receipt identity.
+            def normalized_money(value: Money) -> Money:
+                return Money(format(value.amount.normalize(), "f"), value.currency)
+
+            normalized_lines = tuple(
+                MixedActualLine(
+                    item_id=line.item_id, kind=line.kind, sku_id=line.sku_id,
+                    packs=line.packs,
+                    quantity=Quantity(
+                        format(line.quantity.base_amount.normalize(), "f"),
+                        line.quantity.base_unit,
+                    ),
+                    paid=normalized_money(line.paid),
+                )
+                for line in lines
+            )
             new = MixedReceiptIntent(
-                plan_id, receipt_ref, occurred_at, at,
-                tuple(sorted(lines, key=lambda line: line.item_id)),
-                delivery_and_fees, discount, total_paid, price_changes_approved,
+                plan_id, receipt_ref.strip(), occurred_at, at,
+                tuple(sorted(normalized_lines, key=lambda line: line.item_id)),
+                normalized_money(delivery_and_fees), normalized_money(discount),
+                normalized_money(total_paid), price_changes_approved,
             )
             self._validate(plan, new)
             receipt = self.receipts.claim(new)

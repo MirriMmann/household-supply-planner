@@ -1888,12 +1888,17 @@ async function previewUsualBasket() {
   }
 }
 
-// M12.8: recipe explanations are based only on recorded household facts.
-// Quoting a recipe never writes a plan or a purchase event.
+// Recipe assessments and quotations never mutate household facts. A recipe
+// plan becomes durable only after a separate explicit confirmation.
 function recipeStatusText(recipe) {
   if (recipe.status === "covered") return "По учёту всё есть";
   if (recipe.status === "short") return `Докупить: ${recipe.missing_count} поз.`;
   return "Нужно уточнить остатки";
+}
+
+function invalidateRecipeQuotes() {
+  state.recipeQuoteRevision += 1;
+  renderRecipeList();
 }
 
 function renderRecipeList() {
@@ -1932,11 +1937,18 @@ function renderRecipeList() {
     quoteButton.type = "button";
     quoteButton.className = "secondary-button";
     quoteButton.textContent = "Проверить стоимость недостающего";
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "primary-button hidden";
+    confirmButton.textContent = "Сохранить список недостающих продуктов";
     const result = document.createElement("p");
     result.className = "recipe-quote";
     result.setAttribute("aria-live", "polite");
+    let pendingPreviewId = null;
     quoteButton.addEventListener("click", async () => {
       const generation = state.recipeQuoteRevision;
+      pendingPreviewId = null;
+      confirmButton.classList.add("hidden");
       quoteButton.disabled = true;
       result.textContent = "Проверяем данные…";
       try {
@@ -1957,7 +1969,11 @@ function renderRecipeList() {
           const lines = (data.plan.purchases || []).map(
             (entry) => `${itemName(entry.item_id)}: ${packageText(entry.packs)}`,
           );
-          result.textContent = `Стоимость доступных упаковок: ${moneyText(data.estimated_purchase_cost)}. ${lines.join("; ")}. Это предпросмотр; покупки не оформлены.`;
+          result.textContent = `Стоимость упаковок: ${moneyText(data.estimated_purchase_cost)}. ${lines.join("; ")}. Это предпросмотр; список сохраняется отдельно, покупки пока не совершены.`;
+          if (data.preview_id) {
+            pendingPreviewId = data.preview_id;
+            confirmButton.classList.remove("hidden");
+          }
         } else {
           result.textContent = "При текущем бюджете или предложениях магазинов не удалось покрыть все недостающие ингредиенты.";
         }
@@ -1967,7 +1983,38 @@ function renderRecipeList() {
         quoteButton.disabled = false;
       }
     });
-    actions.append(quoteButton, result);
+    confirmButton.addEventListener("click", async () => {
+      if (!pendingPreviewId || confirmButton.disabled) return;
+      const token = pendingPreviewId;
+      const generation = state.recipeQuoteRevision;
+      confirmButton.disabled = true;
+      result.textContent = "Сохраняем показанный список…";
+      try {
+        const saved = await request(`/recipes/${encodeURIComponent(recipe.recipe_id)}/confirm`, {
+          method: "POST",
+          body: JSON.stringify({preview_id: token}),
+        });
+        pendingPreviewId = null;
+        confirmButton.classList.add("hidden");
+        if (generation === state.recipeQuoteRevision) {
+          result.textContent = "Список сохранён. Запасы не изменены; покупки подтвердите отдельно.";
+        }
+        await refreshOperationalState();
+        renderPlan(saved.plan);
+        showToast("Список недостающих продуктов сохранён.");
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) {
+          pendingPreviewId = null;
+          confirmButton.classList.add("hidden");
+          result.textContent = "Остатки или время предпросмотра изменились. Рассчитайте заново.";
+        } else {
+          result.textContent = friendlyError(error);
+        }
+      } finally {
+        confirmButton.disabled = false;
+      }
+    });
+    actions.append(quoteButton, confirmButton, result);
     card.append(summary, meta, ingredients, steps, actions);
     if (recipe.source_url) {
       const link = document.createElement("a");
@@ -2025,6 +2072,10 @@ byId("repeat-usual-basket").addEventListener("click", repeatUsualBasket);
 for (const input of ["plan-budget", "plan-currency", "plan-horizon", "custom-horizon-days"]) {
   byId(input).addEventListener("input", invalidateUsualBasketPreview);
   byId(input).addEventListener("change", invalidateUsualBasketPreview);
+  if (input === "plan-budget" || input === "plan-currency") {
+    byId(input).addEventListener("input", invalidateRecipeQuotes);
+    byId(input).addEventListener("change", invalidateRecipeQuotes);
+  }
 }
 for (const chip of document.querySelectorAll("[data-days]")) {
   chip.addEventListener("click", invalidateUsualBasketPreview);

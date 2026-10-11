@@ -11,7 +11,11 @@ from household_supply.application.json_api import (
     JsonApiResponse, JsonPayloadError, _parse_money, _require_keys, _require_mapping,
     serialize_plan_result,
 )
+from household_supply.application import PlanRepositoryError, serialize_plan_record
 from household_supply.application.models import ApplicationRequestError
+from household_supply.application.recipe_commit import (
+    RecipePlanCommitService, RecipeStalePreview,
+)
 from household_supply.application.recipe_assessment import (
     RecipeAssessment, assess_recipe, recipe_missing_request,
 )
@@ -56,13 +60,14 @@ class RecipeWebApi:
     household: HouseholdLearningService
     planner: ApplicationPlanner
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    confirmation: RecipePlanCommitService | None = None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         parts = urlsplit(path)
         return (
             method.strip().upper() == "POST"
             and parts.path.startswith("/recipes/")
-            and parts.path.endswith("/quote")
+            and (parts.path.endswith("/quote") or parts.path.endswith("/confirm"))
         )
 
     def handle(
@@ -93,7 +98,7 @@ class RecipeWebApi:
             )
 
         parts = url.path.split("/")
-        if len(parts) != 4 or parts[1] != "recipes" or parts[3] != "quote":
+        if len(parts) != 4 or parts[1] != "recipes" or parts[3] not in {"quote", "confirm"}:
             return JsonApiResponse(404, {"error": "not_found"})
         recipe = lookup.get(parts[2])
         if recipe is None:
@@ -101,30 +106,57 @@ class RecipeWebApi:
         if method != "POST":
             return JsonApiResponse(405, {"error": "method_not_allowed"})
         try:
+            if parts[3] == "confirm":
+                if self.confirmation is None:
+                    return JsonApiResponse(404, {"error": "not_found"})
+                obj = _require_mapping(payload, label="recipe confirmation")
+                _require_keys(obj, label="recipe confirmation", required={"preview_id"})
+                preview_id = obj["preview_id"]
+                if not isinstance(preview_id, str) or not preview_id.startswith("rc-"):
+                    raise JsonPayloadError("invalid recipe preview_id")
+                record = self.confirmation.confirm(
+                    recipe_id=recipe.recipe.id, preview_id=preview_id,
+                )
+                return JsonApiResponse(
+                    201, {"plan": serialize_plan_record(record), "confirmed": True},
+                )
+
             obj = _require_mapping(payload, label="recipe quote")
             _require_keys(obj, label="recipe quote", required={"budget"})
             budget = _parse_money(obj["budget"], label="budget")
             if budget.amount < 0:
                 raise JsonPayloadError("recipe budget cannot be negative")
-            assessment = assess_recipe(
-                recipe, household=self.household.state(as_of=self.clock())
-            )
+            if self.confirmation is None:
+                assessment = assess_recipe(
+                    recipe, household=self.household.state(as_of=self.clock())
+                )
+                request = recipe_missing_request(assessment, budget=budget)
+                planned = self.planner.plan(request) if request is not None else None
+                preview_id = None
+            else:
+                staged = self.confirmation.preview(recipe, budget=budget)
+                assessment = staged.assessment
+                planned = staged.result
+                preview_id = staged.preview_id
             data = {
                 "recipe": _recipe_body(assessment),
                 "estimate_only": True,
+                "preview_id": preview_id,
                 "plan": None,
                 "estimated_purchase_cost": None,
                 "budget": {"amount": str(budget.amount), "currency": budget.currency},
             }
             if assessment.status == "covered":
                 data["estimated_purchase_cost"] = _quantity_cost(Money(0, budget.currency))
-            request = recipe_missing_request(assessment, budget=budget)
-            if request is not None:
-                result = self.planner.plan(request)
-                data["plan"] = serialize_plan_result(result)
-                if result.plan.status.value == "feasible":
-                    data["estimated_purchase_cost"] = _quantity_cost(result.plan.total_cost)
+            if planned is not None:
+                data["plan"] = serialize_plan_result(planned)
+                if planned.plan.status.value == "feasible":
+                    data["estimated_purchase_cost"] = _quantity_cost(planned.plan.total_cost)
             return JsonApiResponse(200, data)
+        except RecipeStalePreview as exc:
+            return JsonApiResponse(409, {"error": "stale_preview", "detail": str(exc)})
+        except PlanRepositoryError as exc:
+            return JsonApiResponse(500, {"error": "plan_storage_failed", "detail": str(exc)})
         except (ValueError, TypeError, JsonPayloadError, ApplicationRequestError) as exc:
             return JsonApiResponse(422, {"error": "invalid_request", "detail": str(exc)})
         except ApplicationMarketError as exc:

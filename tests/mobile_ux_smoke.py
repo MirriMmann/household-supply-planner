@@ -592,7 +592,28 @@ def recipes_from_home(browser) -> None:
         assert api(base, "/household/history")["event_count"] == 2
         viewport_check(browser, "cook-from-home quote")
         screenshot(browser, "17-recipes-price-quote-no-purchase")
-        print("PASS recipes: unknown stock, fresh stock, package quote, no silent writes", flush=True)
+
+        # The displayed recipe shortage plan is saved only after a separate tap.
+        save = first.find_element(By.CSS_SELECTOR, ".recipe-actions .primary-button")
+        assert save.is_displayed() and save.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            save,
+        )
+        save.click()
+        wait.until(lambda d: len(api(base, "/plans?limit=12")["plans"]) == 1)
+        saved_id = api(base, "/plans?limit=12")["plans"][0]["plan_id"]
+        saved_plan = api(base, f"/plans/{saved_id}")
+        assert saved_plan["request"]["decision_basis"]["kind"] == "recipe"
+        assert saved_plan["request"]["decision_basis"]["recipe_id"] == "milk-rice"
+        assert api(base, "/household/history")["event_count"] == 2
+        assert browser.find_element(By.ID, "plan-result-panel").is_displayed()
+        viewport_check(browser, "cook-from-home confirmed plan")
+        screenshot(browser, "18-recipes-confirmed-plan-no-purchase")
+        print(
+            "PASS recipes: unknown stock, package quote, explicit saved plan, no purchase",
+            flush=True,
+        )
 
 
 def main() -> None:

@@ -452,6 +452,9 @@ class MixedPlanService:
                 raise MixedPlanError("no seller-verified weight minimum/step")
             if not isinstance(rule, VerifiedWeightSaleRule):
                 raise MixedPlanError("invalid weighted sale rule authority")
+            # Acquisition just happened: the observation timestamp can be
+            # milliseconds later than the initial preview clock.
+            created_at = self._now()
             if not (
                 created_at - self.max_age <= observed.observed_at <= created_at
                 and created_at - self.max_rule_age <= rule.verified_at <= observed.observed_at
@@ -468,6 +471,15 @@ class MixedPlanService:
                 item=Item(line["item_id"], candidate.item_name, "weighted_grocery"),
                 quote=quote, budget=budget, created_at=created_at,
             )))
+        # One normalized capture time after all source observations.
+        created_at = self._now()
+        weighted = [
+            MixedWeightLine(replace(x.record, created_at=created_at))
+            for x in weighted
+        ]
+        for entry in weighted:
+            if not created_at - self.max_age <= entry.record.quote.observation.observed_at <= created_at:
+                raise MixedPlanConflict("weighted price stale after mixed acquisition")
         weighted_cost = Money.zero(budget.currency)
         for entry in weighted:
             weighted_cost += entry.cost

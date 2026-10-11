@@ -595,3 +595,93 @@ def test_receipt_discount_and_delivery_are_accounted_to_paid_total(tmp_path):
         "amount": "110", "currency": "KGS"
     }
     assert len(service.household.history().events) == 4
+
+
+def test_receipt_review_preview_validates_without_claim_or_inventory_writes(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    actual = _actual(plan)
+    before = len(service.household.history().events)
+    for _ in range(2):
+        preview = service.preview_actual(**actual)
+        assert preview["validated"] is True
+        assert preview["persisted"] is False
+        assert preview["inventory_updated"] is False
+        assert preview["checkout_confirmed"] is False
+        assert preview["all_demands_fulfilled"] is False
+        assert preview["budget_remaining_after_paid"] == {
+            "amount": "0", "currency": "KGS"
+        }
+        assert {entry["item_id"] for entry in preview["lines"]} == {
+            "onion", "rice"
+        }
+        assert len(service.household.history().events) == before
+        assert service.receipts.get(plan.plan_id) is None
+        assert service.status(plan.plan_id)["state"] == "not_received"
+
+    with pytest.raises(MixedReceiptConflict, match="received mass exceeds"):
+        service.preview_actual(**dict(actual, lines=(
+            MixedActualLine(
+                "onion", "weighted", "", None, Quantity("350", "g"),
+                Money("14.5", "KGS"),
+            ),
+            actual["lines"][1],
+        )))
+    assert service.receipts.get(plan.plan_id) is None
+    assert len(service.household.history().events) == before
+
+
+def test_receipt_review_http_preview_and_explicit_immutable_retry(tmp_path):
+    app, plan, service = _receipt_runtime(tmp_path)
+    api = replace(app.api, mixed_receipt_api=MixedReceiptWebApi(service))
+    root = f"/mixed/plans/{plan.plan_id.value}/receipt"
+    payload = {
+        "receipt_ref": "invoice:review-ui-001",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "lines": [
+            {"kind": "weighted", "item_id": "onion",
+             "actual_mass": {"amount": "0.29", "unit": "kg"},
+             "paid": {"amount": "14.5", "currency": "KGS"}},
+            {"kind": "fixed_package", "item_id": "rice",
+             "sku_id": "rice-1kg", "packs": 1,
+             "paid": {"amount": "95", "currency": "KGS"}},
+        ],
+        "delivery_and_fees": {"amount": "0.5", "currency": "KGS"},
+        "discount": {"amount": "0", "currency": "KGS"},
+        "total_paid": {"amount": "110", "currency": "KGS"},
+        "price_changes_approved": True,
+    }
+    assert app.api.handle("POST", root + "/preview", payload).status == 404
+    assert app.api.handle("POST", root + "/retry", {"confirmation": "RETRY"}).status == 404
+    before = len(service.household.history().events)
+    preview = api.handle("POST", root + "/preview", payload)
+    assert preview.status == 200, preview.body
+    assert preview.body["validated"] is True
+    assert preview.body["requires_explicit_confirmation"] is True
+    assert preview.body["inventory_updated"] is False
+    assert len(service.household.history().events) == before
+    assert api.handle("GET", root).body["state"] == "not_received"
+    assert api.handle("POST", root + "/retry", {"confirmation": "RETRY"}).status == 409
+    assert api.handle("POST", root + "/preview", {
+        **payload, "lines": payload["lines"][:1]
+    }).status == 422
+    assert api.handle("POST", root + "/preview", {
+        **payload, "total_paid": {"amount": "111", "currency": "KGS"}
+    }).status == 422
+    assert api.handle("POST", root + "/preview?unsafe=1", payload).status == 400
+    assert api.handle("GET", root + "/preview").status == 405
+
+    confirmed = api.handle("POST", root, payload)
+    assert confirmed.status == 201, confirmed.body
+    assert confirmed.body["state"] == "completed"
+    assert len(service.household.history().events) == before + 2
+    assert api.handle("POST", root + "/retry", {"confirmation": "wrong"}).status == 422
+    retried = api.handle("POST", root + "/retry", {"confirmation": "RETRY"})
+    assert retried.status == 201
+    assert retried.body["state"] == "completed"
+    assert len(service.household.history().events) == before + 2
+    assert api.handle("POST", root + "/preview", {
+        **payload, "receipt_ref": "invoice:new"
+    }).status == 409
+    assert api.handle("POST", root + "/retry", {
+        "confirmation": "RETRY", "override_cost": "1"
+    }).status == 422

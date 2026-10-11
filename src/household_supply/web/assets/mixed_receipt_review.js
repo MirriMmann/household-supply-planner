@@ -348,7 +348,10 @@
       by("mixed-receipt-claimed").hidden = true;
       plan = null;
       planId = null;
-    } else if (by("mixed-receipt-editor").contains(event.target)) {
+    } else if (
+      by("mixed-receipt-editor").contains(event.target)
+      && event.target.id !== "mixed-receipt-final-consent"
+    ) {
       invalidate();
     }
   });

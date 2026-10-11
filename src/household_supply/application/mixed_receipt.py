@@ -574,6 +574,19 @@ class MixedReceiptService:
                 "requires_explicit_confirmation": True,
             }
 
+    def retry_claimed(self, plan_id: PlanId) -> dict:
+        """Explicit recovery using immutable receipt bytes already claimed."""
+        existing = self.receipts.get(plan_id)
+        if existing is None:
+            raise MixedReceiptConflict("no claimed receipt to recover")
+        return self.confirm(
+            plan_id=plan_id, receipt_ref=existing.receipt_ref,
+            occurred_at=existing.occurred_at, lines=existing.lines,
+            delivery_and_fees=existing.delivery_and_fees,
+            discount=existing.discount, total_paid=existing.total_paid,
+            price_changes_approved=existing.price_changes_approved,
+        )
+
     def confirm(
         self, *,
         plan_id: PlanId,

@@ -6,6 +6,8 @@ from typing import Callable
 
 from household_supply.domain import CatalogSnapshot, Quantity, SKU
 from household_supply.domain._decimal import multiply_decimal_by_int_exact
+from household_supply.market.catalogs.globus_weight_candidates import WEIGHT_CANDIDATES
+from household_supply.domain import Item
 from household_supply.household import (
     DepletionLearningReport,
     HouseholdEvent,
@@ -140,9 +142,17 @@ class HouseholdOperationsService:
     def _item(self, item_id: str):
         item = catalog_items_by_id(self.catalog).get(item_id)
         if item is None:
-            raise UnknownCatalogItemError(
-                f"stocktake item is not present in configured catalog: {item_id}"
+            # Weighed groceries have a canonical sourced identity even though
+            # no seller min/step exists to admit them as purchasable SKUs.
+            # Manual observed stock is independent of store sellability.
+            candidate = next(
+                (row for row in WEIGHT_CANDIDATES if row.item_id == item_id), None
             )
+            if candidate is None:
+                raise UnknownCatalogItemError(
+                    f"stocktake item is not present in configured catalog: {item_id}"
+                )
+            return Item(item_id, candidate.item_name, "weighted_grocery"), {"mass"}
         dimensions = {
             sku.package_quantity.dimension
             for sku in self.catalog.skus

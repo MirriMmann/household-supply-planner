@@ -33,7 +33,8 @@ The separate governed pilot enforces:
 6. After explicit confirmation append a regular HSM `PurchaseEvent` (the
    **actual measured grams**, with no fictitious fixed SKU); persist a typed
    receipt snapshot and bind its item/mass/cost/reference to the purchase
-   event source fingerprint. Idempotent retries do not duplicate inventory.
+   event source fingerprint. Idempotent retries do not duplicate inventory;
+   equivalent gram/kilogram representations share the same receipt identity.
    Another event cannot complete the same single-line plan.
 7. If household event persistence succeeded but receipt persistence failed,
    retry the same event/receipt to recover the missing record; conflicting
@@ -95,8 +96,10 @@ Follow-on integration before production:
 - Acquire fresh *seller-authenticated* sale min/step and address-specific price.
 - Decide whether variable weights are measured before or after checkout and
   model any checkout-price variance/refund/approval window.
-- Add household stocktake UX for weighted-only canonical Item identities;
-  currently ordinary stocktake demands a fixed-SKU catalog identity.
+- The existing `POST /household/stocktakes` now accepts *manual observed*
+  positive or zero mass for the ten explicitly registered weight-only Items
+  (including onion/potato), without inventing purchasable fixed-size SKUs.
+  The product web stocktake UX still needs discovery and labeling work.
 - Integrate weighted plans into general plan review/search and mobile shopping
   without conflating `Purchase.packs` with grams.
 - Demonstrate a supervised live receipt and repeat purchase against a real

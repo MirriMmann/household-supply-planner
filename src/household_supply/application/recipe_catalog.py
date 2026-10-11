@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from household_supply.domain import CatalogSnapshot, Quantity, Recipe, RecipeIngredient
+from .kyrgyz_recipes import KYRGYZ_RECIPE_SPECS
 from .models import catalog_items_by_id
 
 
@@ -80,27 +81,90 @@ _STARTER = (
 )
 
 
-def starter_recipe_pack(catalog: CatalogSnapshot) -> tuple[CuratedRecipe, ...]:
-    """Only expose recipes whose every ingredient is in the exact local catalog.
+@dataclass(frozen=True, slots=True)
+class RecipeCatalogCoverage:
+    recipe_id: str
+    missing_item_ids: tuple[str, ...]
+    incompatible_unit_item_ids: tuple[str, ...]
 
-    Unknown/unsupported ingredients are not silently dropped from a recipe.
+    @property
+    def supported(self) -> bool:
+        return not (self.missing_item_ids or self.incompatible_unit_item_ids)
+
+
+def _coverage(spec: tuple, *, items: dict, packages: dict) -> RecipeCatalogCoverage:
+    recipe_id, _, _, _, _, ingredients, _ = spec
+    missing = []
+    incompatible = []
+    for item_id, amount, unit in ingredients:
+        if item_id not in items:
+            missing.append(item_id)
+        elif not any(
+            Quantity(amount, unit).compatible_with(package)
+            for package in packages.get(item_id, ())
+        ):
+            incompatible.append(item_id)
+    return RecipeCatalogCoverage(
+        recipe_id, tuple(sorted(set(missing))), tuple(sorted(set(incompatible)))
+    )
+
+
+def _catalog_packages(catalog: CatalogSnapshot) -> dict:
+    packages = {}
+    for sku in catalog.skus:
+        packages.setdefault(sku.item.id, []).append(sku.package_quantity)
+    return packages
+
+
+def kyrgyz_recipe_coverage(catalog: CatalogSnapshot) -> tuple[RecipeCatalogCoverage, ...]:
+    """Audit all five candidates, even when no recipe is publishable.
+
+    Coverage is about catalog item identity and package-compatible units.
+    It is NOT a promise of fresh market offers, stock on hand, or feasible cost.
     """
     items = catalog_items_by_id(catalog)
-    choices = {}
-    for sku in catalog.skus:
-        choices.setdefault(sku.item.id, []).append(sku.package_quantity)
+    packages = _catalog_packages(catalog)
+    return tuple(
+        _coverage(spec, items=items, packages=packages)
+        for spec in KYRGYZ_RECIPE_SPECS
+    )
+
+
+def _supported_recipe_pack(catalog: CatalogSnapshot, specs: tuple) -> tuple[CuratedRecipe, ...]:
+    items = catalog_items_by_id(catalog)
+    packages = _catalog_packages(catalog)
     recipes = []
-    for ident, name, category, cuisine, servings, ingredients, steps in _STARTER:
-        if any(
-            item_id not in items
-            or not any(Quantity(amount, unit).compatible_with(pack) for pack in choices[item_id])
-            for item_id, amount, unit in ingredients
-        ):
+    for spec in specs:
+        ident, name, category, cuisine, servings, ingredients, steps = spec
+        if not _coverage(spec, items=items, packages=packages).supported:
+            # Keep every ingredient in candidate definitions; never remove one
+            # to make a recipe appear cookable or give it an invented quote.
             continue
         recipe = Recipe(
             ident, name, servings,
-            tuple(RecipeIngredient(items[item_id], Quantity(amount, unit))
-                  for item_id, amount, unit in ingredients),
+            tuple(
+                RecipeIngredient(items[item_id], Quantity(amount, unit))
+                for item_id, amount, unit in ingredients
+            ),
         )
         recipes.append(CuratedRecipe(recipe, category, cuisine, tuple(steps)))
-    return tuple(sorted(recipes, key=lambda x: x.recipe.id))
+    return tuple(sorted(recipes, key=lambda entry: entry.recipe.id))
+
+
+def starter_recipe_pack(catalog: CatalogSnapshot) -> tuple[CuratedRecipe, ...]:
+    """The original 15-recipe starter pack, filtered by exact catalog coverage."""
+    return _supported_recipe_pack(catalog, _STARTER)
+
+
+def kyrgyz_recipe_pack(catalog: CatalogSnapshot) -> tuple[CuratedRecipe, ...]:
+    """Only publish Kyrgyz dishes whose EVERY ingredient has a compatible SKU."""
+    return _supported_recipe_pack(catalog, KYRGYZ_RECIPE_SPECS)
+
+
+def available_recipe_pack(catalog: CatalogSnapshot) -> tuple[CuratedRecipe, ...]:
+    """One catalog-gated pool for the existing read-only/confirmation APIs."""
+    recipes = (*starter_recipe_pack(catalog), *kyrgyz_recipe_pack(catalog))
+    ids = [entry.recipe.id for entry in recipes]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate recipe identity across content packs")
+    return tuple(sorted(recipes, key=lambda entry: entry.recipe.id))

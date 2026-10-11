@@ -607,7 +607,8 @@ def recipes_from_home(browser) -> None:
         assert saved_plan["request"]["decision_basis"]["kind"] == "recipe"
         assert saved_plan["request"]["decision_basis"]["recipe_id"] == "milk-rice"
         assert api(base, "/household/history")["event_count"] == 2
-        assert browser.find_element(By.ID, "plan-result-panel").is_displayed()
+        # Server persistence precedes the async browser refresh/render step.
+        wait.until(lambda d: d.find_element(By.ID, "plan-result-panel").is_displayed())
         viewport_check(browser, "cook-from-home confirmed plan")
         screenshot(browser, "18-recipes-confirmed-plan-no-purchase")
         print(

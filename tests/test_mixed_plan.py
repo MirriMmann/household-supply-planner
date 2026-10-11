@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 import json
 
 import pytest
@@ -271,11 +272,10 @@ def test_source_less_globus_weighted_cart_disallows_live_mixed_plan(tmp_path):
 def test_seller_rule_can_expire_during_active_preview_before_explicit_save(tmp_path):
     app, service, _, _ = runtime(tmp_path)
     with_known_stock(app)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc) + timedelta(seconds=15)
     service.clock = lambda: now
-    service.prices.clock = lambda: now
-    service.shopping.clock = lambda: now
-    service.package_planner.clock = lambda: now
+    service.prices = replace(service.prices, clock=lambda: now)
+    service.shopping = replace(service.shopping, clock=lambda: now)
 
     # A controlled rule source, within the 1-hour TTL at preview time,
     # but older than that TTL when the user returns 10 minutes later.

@@ -27,20 +27,26 @@ class MixedReceiptWebApi:
     service: MixedReceiptService
 
     @staticmethod
-    def _id(path: str) -> str | None:
+    def _route(path: str) -> tuple[str, str] | None:
         parts = path.split("/")
+        if len(parts) == 5 and parts[:3] == ["", "mixed", "plans"] and parts[4] == "receipt":
+            return parts[3], "receipt"
         if (
-            len(parts) == 5
-            and parts[:3] == ["", "mixed", "plans"]
-            and parts[4] == "receipt"
+            len(parts) == 6 and parts[:3] == ["", "mixed", "plans"]
+            and parts[4:] == ["receipt", "preview"]
         ):
-            return parts[3]
+            return parts[3], "preview"
+        if (
+            len(parts) == 6 and parts[:3] == ["", "mixed", "plans"]
+            and parts[4:] == ["receipt", "retry"]
+        ):
+            return parts[3], "retry"
         return None
 
     def accepts_json_body(self, method: str, path: str) -> bool:
         return (
             method.strip().upper() == "POST"
-            and self._id(urlsplit(path).path) is not None
+            and self._route(urlsplit(path).path) is not None
         )
 
     def handle(
@@ -49,16 +55,25 @@ class MixedReceiptWebApi:
         target = urlsplit(path)
         if target.scheme or target.netloc or target.fragment or target.query:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
-        raw_plan_id = self._id(target.path)
-        if raw_plan_id is None:
+        route = self._route(target.path)
+        if route is None:
             return JsonApiResponse(404, {"error": "not_found"})
         verb = method.strip().upper()
-        if verb not in {"GET", "POST"}:
+        if verb not in ({"POST"} if route[1] == "preview" else {"GET", "POST"}):
             return JsonApiResponse(405, {"error": "method_not_allowed"})
         try:
-            plan_id = PlanId(raw_plan_id)
+            plan_id = PlanId(route[0])
             if verb == "GET":
                 return JsonApiResponse(200, self.service.status(plan_id))
+            if route[1] == "retry":
+                obj = _require_mapping(payload, label="mixed receipt recovery")
+                _require_keys(obj, label="mixed receipt recovery", required={"confirmation"})
+                if obj["confirmation"] != "RETRY":
+                    raise JsonPayloadError("receipt retry must be explicitly confirmed")
+                outcome = self.service.retry_claimed(plan_id)
+                return JsonApiResponse(
+                    201 if outcome["state"] == "completed" else 202, outcome
+                )
             obj = _require_mapping(payload, label="mixed actual receipt")
             _require_keys(obj, label="mixed actual receipt", required={
                 "receipt_ref", "occurred_at", "lines", "delivery_and_fees",
@@ -114,7 +129,11 @@ class MixedReceiptWebApi:
             occurred = datetime.fromisoformat(
                 _require_string(obj["occurred_at"], label="occurred_at")
             )
-            outcome = self.service.confirm(
+            action = (
+                self.service.preview_actual if route[1] == "preview"
+                else self.service.confirm
+            )
+            outcome = action(
                 plan_id=plan_id,
                 receipt_ref=_require_string(obj["receipt_ref"], label="receipt_ref"),
                 occurred_at=occurred,
@@ -126,6 +145,8 @@ class MixedReceiptWebApi:
                 total_paid=_parse_money(obj["total_paid"], label="total_paid"),
                 price_changes_approved=authorized,
             )
+            if route[1] == "preview":
+                return JsonApiResponse(200, outcome)
             return JsonApiResponse(
                 201 if outcome["state"] == "completed" else 202, outcome
             )

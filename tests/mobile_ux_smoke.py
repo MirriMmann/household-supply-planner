@@ -92,6 +92,49 @@ def demo():
 
 
 @contextmanager
+def private_receipt_review_demo():
+    """Synthetic sale rules only; opt-in API never enabled in production demo."""
+    with tempfile.TemporaryDirectory(prefix="m1218-receipt-review-") as folder:
+        port = free_port()
+        base = f"http://127.0.0.1:{port}"
+        log_path = ARTIFACTS / f"receipt-review-server-{port}.log"
+        with log_path.open("wb") as log:
+            server = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "tests" / "mixed_receipt_review_pilot_server.py"),
+                    "--port", str(port), "--data-dir", folder,
+                ],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+            )
+            try:
+                for _ in range(100):
+                    if server.poll() is not None:
+                        raise RuntimeError(
+                            f"Receipt review pilot stopped; see {log_path}\n"
+                            + log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+                        )
+                    try:
+                        api(base, "/catalog")
+                        break
+                    except (URLError, TimeoutError, ConnectionError):
+                        time.sleep(0.1)
+                else:
+                    raise RuntimeError(f"Receipt review pilot did not start; see {log_path}")
+                plan_id = (Path(folder) / "pilot-plan-id.txt").read_text(
+                    encoding="ascii"
+                )
+                yield base, plan_id
+            finally:
+                server.terminate()
+                try:
+                    server.wait(timeout=6)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.wait(timeout=6)
+
+
+@contextmanager
 def mobile_browser():
     opts = webdriver.ChromeOptions()
     opts.add_argument("--headless=new")
@@ -689,6 +732,137 @@ def shared_weighted_shopping_readiness(browser) -> None:
         )
 
 
+def mixed_receipt_review_mobile(browser) -> None:
+    """Review must be read-only; only a second explicit tap posts all Items."""
+    with private_receipt_review_demo() as (base, plan_id):
+        browser.get(base + "/")
+        wait = WebDriverWait(browser, 20)
+        wait.until(lambda d: d.find_element(
+            By.CSS_SELECTOR, "#connection-status.online"
+        ))
+        onboarding = browser.find_element(By.ID, "onboarding-layer")
+        if onboarding.is_displayed():
+            browser.find_element(By.ID, "onboarding-skip").click()
+
+        browser.find_element(By.CSS_SELECTOR, '[data-view="history"]').click()
+        panel = browser.find_element(By.ID, "mixed-receipt-review-panel")
+        wait.until(lambda d: not panel.get_attribute("hidden"))
+        assert not panel.get_attribute("hidden")
+        summary = panel.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            summary,
+        )
+        summary.click()
+        identifier = browser.find_element(By.ID, "mixed-receipt-plan-id")
+        identifier.send_keys(plan_id)
+        browser.find_element(By.ID, "mixed-receipt-load").click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-editor"
+        ).get_attribute("hidden"))
+        assert api(base, "/household/history")["event_count"] == 2
+
+        # Simulate actual delivery of 290g against a planned 300g.
+        mass = browser.find_element(By.CSS_SELECTOR, '[id^="mixed-mass-"]')
+        mass.clear()
+        mass.send_keys("290")
+        prices = browser.find_elements(By.CSS_SELECTOR, '[id^="mixed-paid-"]')
+        assert len(prices) == 2
+        for paid in prices:
+            if paid.get_attribute("id").endswith("-0"):
+                # Sorted by Item ID: onion first; its 300g reference is 15 som.
+                paid.clear()
+                paid.send_keys("14.5")
+        ref = browser.find_element(By.ID, "mixed-receipt-ref")
+        ref.send_keys("operator-mobile-receipt-001")
+        fees = browser.find_element(By.ID, "mixed-receipt-fees")
+        fees.clear()
+        fees.send_keys("0.5")
+        approval = browser.find_element(By.ID, "mixed-receipt-price-approval")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            approval,
+        )
+        approval.click()
+
+        preview = browser.find_element(By.ID, "mixed-receipt-preview")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview,
+        )
+        preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-reviewed"
+        ).get_attribute("hidden"))
+        assert "10 g" in browser.find_element(
+            By.ID, "mixed-receipt-reviewed-details"
+        ).text
+        assert api(base, "/household/history")["event_count"] == 2
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "not_received"
+        confirm = browser.find_element(By.ID, "mixed-receipt-confirm")
+        assert not confirm.is_enabled()
+        viewport_check(browser, "private receipt review before purchase")
+        screenshot(browser, "21-mixed-receipt-validated-uncommitted")
+
+        # Any edit after server review must invalidate authorization, even if
+        # the operator subsequently restores the original receipt value.
+        reference = browser.find_element(By.ID, "mixed-receipt-ref")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reference,
+        )
+        reference.send_keys("-draft-change")
+        assert browser.find_element(By.ID, "mixed-receipt-reviewed").get_attribute("hidden")
+        assert not confirm.is_enabled()
+        reference.clear()
+        reference.send_keys("operator-mobile-receipt-001")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            preview,
+        )
+        preview.click()
+        wait.until(lambda d: not d.find_element(
+            By.ID, "mixed-receipt-reviewed"
+        ).get_attribute("hidden"))
+        assert not confirm.is_enabled()
+        assert api(base, "/household/history")["event_count"] == 2
+
+        consent = browser.find_element(By.ID, "mixed-receipt-final-consent")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            consent,
+        )
+        consent.click()
+        assert confirm.is_enabled()
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            confirm,
+        )
+        confirm.click()
+        wait.until(lambda d: "уже обработан" in d.find_element(
+            By.ID, "mixed-receipt-claimed-details"
+        ).text)
+        assert api(base, f"/mixed/plans/{plan_id}/receipt")["state"] == "completed"
+        assert api(base, "/household/history")["event_count"] == 4
+        assert browser.find_element(By.ID, "mixed-receipt-editor").get_attribute("hidden")
+        assert browser.find_element(By.ID, "mixed-receipt-retry").get_attribute("hidden")
+
+        # Reentry must not generate a second purchase.
+        reload_button = browser.find_element(By.ID, "mixed-receipt-load")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            reload_button,
+        )
+        reload_button.click()
+        wait.until(lambda d: "уже обработан" in d.find_element(
+            By.ID, "mixed-receipt-claimed-details"
+        ).text)
+        assert api(base, "/household/history")["event_count"] == 4
+        viewport_check(browser, "private mixed receipt committed")
+        screenshot(browser, "22-mixed-receipt-committed-atomic")
+        print("PASS receipt review: 2 steps, actual mass, one atomic purchase", flush=True)
+
+
 def main() -> None:
     with mobile_browser() as browser:
         onboarding_wizard(browser)
@@ -697,6 +871,7 @@ def main() -> None:
         routine_stand_preview(browser)
         recipes_from_home(browser)
         shared_weighted_shopping_readiness(browser)
+        mixed_receipt_review_mobile(browser)
     print("MOBILE_UX_SMOKE_OK", flush=True)
 
 

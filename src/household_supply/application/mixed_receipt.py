@@ -473,6 +473,120 @@ class MixedReceiptService:
             "estimated_merchandise_total": _m(plan.estimated_total),
         }
 
+    def _prepare_intent(
+        self, *,
+        plan_id: PlanId,
+        receipt_ref: str,
+        occurred_at: datetime,
+        lines: tuple[MixedActualLine, ...],
+        delivery_and_fees: Money,
+        discount: Money,
+        total_paid: Money,
+        price_changes_approved: bool,
+    ) -> tuple[MixedPlanRecord, MixedReceiptIntent]:
+        plan = self._plan(plan_id)
+        at = self.clock()
+        _time(at)
+        _time(occurred_at)
+        if occurred_at > at:
+            raise MixedReceiptError("receipt purchase time cannot be in the future")
+        # Exact equivalence: 0.29kg == 290g and 14.50 KGS ==
+        # 14.5 KGS must replay the same immutable receipt identity.
+        def normalized_money(value: Money) -> Money:
+            return Money(format(value.amount.normalize(), "f"), value.currency)
+
+        normalized_lines = tuple(
+            MixedActualLine(
+                item_id=line.item_id, kind=line.kind, sku_id=line.sku_id,
+                packs=line.packs,
+                quantity=Quantity(
+                    format(line.quantity.base_amount.normalize(), "f"),
+                    line.quantity.base_unit,
+                ),
+                paid=normalized_money(line.paid),
+            )
+            for line in lines
+        )
+        new = MixedReceiptIntent(
+            plan_id, receipt_ref.strip(), occurred_at, at,
+            tuple(sorted(normalized_lines, key=lambda line: line.item_id)),
+            normalized_money(delivery_and_fees), normalized_money(discount),
+            normalized_money(total_paid), price_changes_approved,
+        )
+        self._validate(plan, new)
+        prior = self.receipts.get(plan_id)
+        if prior is not None and prior.basis() != new.basis():
+            raise MixedReceiptConflict("different receipt already claimed this mixed plan")
+        return plan, new
+
+    def preview_actual(
+        self, *,
+        plan_id: PlanId,
+        receipt_ref: str,
+        occurred_at: datetime,
+        lines: tuple[MixedActualLine, ...],
+        delivery_and_fees: Money,
+        discount: Money,
+        total_paid: Money,
+        price_changes_approved: bool,
+    ) -> dict:
+        """Validate complete actual receipt, without claiming or posting anything."""
+        with self._lock:
+            plan, receipt = self._prepare_intent(
+                plan_id=plan_id, receipt_ref=receipt_ref, occurred_at=occurred_at,
+                lines=lines, delivery_and_fees=delivery_and_fees,
+                discount=discount, total_paid=total_paid,
+                price_changes_approved=price_changes_approved,
+            )
+            planned_by_item = {p.item_id: p.cost for p in plan.packages}
+            planned_by_item.update({
+                w.item_id: w.record.quote.estimated_upper_bound for w in plan.weights
+            })
+            required_by_item = {d.item_id: d.missing for d in plan.demands}
+            report = []
+            for line in receipt.lines:
+                expected = required_by_item[line.item_id]
+                missing = max(expected.base_amount - line.quantity.base_amount, 0)
+                report.append({
+                    "item_id": line.item_id, "kind": line.kind,
+                    "actual_received": _q(line.quantity),
+                    "required_to_buy": _q(expected.as_base()),
+                    "still_missing_after_receipt": _q(Quantity(missing, expected.base_unit)),
+                    "paid": _m(line.paid),
+                    "estimated_line_cost": _m(planned_by_item[line.item_id]),
+                    "line_price_increased": line.paid.amount > planned_by_item[line.item_id].amount,
+                })
+            return {
+                "plan_id": plan_id.value, "validated": True, "persisted": False,
+                "inventory_updated": False, "checkout_confirmed": False,
+                "receipt_ref": receipt.receipt_ref,
+                "lines": report, "all_demands_fulfilled": all(
+                    row["still_missing_after_receipt"]["amount"] == "0"
+                    for row in report
+                ),
+                "estimated_merchandise_total": _m(plan.estimated_total),
+                "total_paid": _m(receipt.total_paid),
+                "delivery_and_fees": _m(receipt.delivery_and_fees),
+                "discount": _m(receipt.discount),
+                "budget": _m(plan.budget),
+                "budget_remaining_after_paid": _m(plan.budget - receipt.total_paid),
+                "price_changes_approved": receipt.price_changes_approved,
+                "requires_explicit_confirmation": True,
+            }
+
+    def retry_claimed(self, plan_id: PlanId) -> dict:
+        """Explicit recovery using immutable receipt bytes already claimed."""
+        existing = self.receipts.get(plan_id)
+        if existing is None:
+            raise MixedReceiptConflict("no claimed receipt to recover")
+        return self.confirm(
+            plan_id=plan_id, receipt_ref=existing.receipt_ref,
+            occurred_at=existing.occurred_at, lines=existing.lines,
+            delivery_and_fees=existing.delivery_and_fees,
+            discount=existing.discount, total_paid=existing.total_paid,
+            price_changes_approved=existing.price_changes_approved,
+        )
+
     def confirm(
         self, *,
         plan_id: PlanId,
@@ -485,36 +599,13 @@ class MixedReceiptService:
         price_changes_approved: bool,
     ) -> dict:
         with self._lock:
-            plan = self._plan(plan_id)
-            at = self.clock()
-            _time(at)
-            _time(occurred_at)
-            if occurred_at > at:
-                raise MixedReceiptError("receipt purchase time cannot be in the future")
-            # Exact equivalence: 0.29kg == 290g and 14.50 KGS ==
-            # 14.5 KGS must replay the same immutable receipt identity.
-            def normalized_money(value: Money) -> Money:
-                return Money(format(value.amount.normalize(), "f"), value.currency)
-
-            normalized_lines = tuple(
-                MixedActualLine(
-                    item_id=line.item_id, kind=line.kind, sku_id=line.sku_id,
-                    packs=line.packs,
-                    quantity=Quantity(
-                        format(line.quantity.base_amount.normalize(), "f"),
-                        line.quantity.base_unit,
-                    ),
-                    paid=normalized_money(line.paid),
-                )
-                for line in lines
+            plan, new = self._prepare_intent(
+                plan_id=plan_id, receipt_ref=receipt_ref, occurred_at=occurred_at,
+                lines=lines, delivery_and_fees=delivery_and_fees,
+                discount=discount, total_paid=total_paid,
+                price_changes_approved=price_changes_approved,
             )
-            new = MixedReceiptIntent(
-                plan_id, receipt_ref.strip(), occurred_at, at,
-                tuple(sorted(normalized_lines, key=lambda line: line.item_id)),
-                normalized_money(delivery_and_fees), normalized_money(discount),
-                normalized_money(total_paid), price_changes_approved,
-            )
-            self._validate(plan, new)
+            at = new.recorded_at
             receipt = self.receipts.claim(new)
             self._validate(plan, receipt)
             events = self._events(plan, receipt)

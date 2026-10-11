@@ -602,7 +602,8 @@ def recipes_from_home(browser) -> None:
         )
         save.click()
         wait.until(lambda d: len(api(base, "/plans?limit=12")["plans"]) == 1)
-        saved_plan = api(base, "/plans?limit=12")["plans"][0]
+        saved_id = api(base, "/plans?limit=12")["plans"][0]["plan_id"]
+        saved_plan = api(base, f"/plans/{saved_id}")
         assert saved_plan["request"]["decision_basis"]["kind"] == "recipe"
         assert saved_plan["request"]["decision_basis"]["recipe_id"] == "milk-rice"
         assert api(base, "/household/history")["event_count"] == 2

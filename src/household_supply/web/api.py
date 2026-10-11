@@ -213,7 +213,13 @@ class HouseholdWebJsonApi:
         if target.scheme or target.netloc or target.fragment:
             return JsonApiResponse(400, {"error": "invalid_request_target"})
 
-        if target.path.startswith("/mixed/plans/") and target.path.endswith("/receipt"):
+        if (
+            target.path.startswith("/mixed/plans/")
+            and (
+                target.path.endswith("/receipt")
+                or target.path.endswith("/receipt/preview")
+            )
+        ):
             if self.mixed_receipt_api is None:
                 return JsonApiResponse(404, {"error": "not_found"})
             return self.mixed_receipt_api.handle(method, path, payload)
@@ -258,6 +264,10 @@ class HouseholdWebJsonApi:
                 "estimate_supported": self.weighted_api is not None,
                 "seller_weight_rules_verified": False,
                 "mixed_plan_enabled": self.mixed_plan_api is not None,
+                "mixed_receipt_review_enabled": (
+                    self.mixed_plan_api is not None
+                    and self.mixed_receipt_api is not None
+                ),
                 "notice": (
                     "Весовые позиции приведены только для исследования рынка. "
                     "HSM пока не может создавать из них закупки или утверждать актуальную цену."

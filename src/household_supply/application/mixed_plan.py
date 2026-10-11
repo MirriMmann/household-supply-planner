@@ -6,7 +6,7 @@ reference price alone is insufficient authority to create this plan.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -486,6 +486,16 @@ class MixedPlanService:
             )
             if planned.plan.status.value != "feasible":
                 raise MixedPlanError("packaged part cannot cover every demand within remaining budget")
+            # Package market acquisition may have occurred after the weight
+            # request; capture the final atomic snapshot once both are known.
+            created_at = self._now()
+            weighted = [
+                MixedWeightLine(replace(x.record, created_at=created_at))
+                for x in weighted
+            ]
+            for entry in weighted:
+                if not created_at - self.max_age <= entry.record.quote.observation.observed_at <= created_at:
+                    raise MixedPlanConflict("weighted price became stale while acquiring packaged offers")
             for purchase in planned.plan.purchases:
                 offer = purchase.offer
                 if not created_at - self.max_age <= offer.observed_at <= created_at:

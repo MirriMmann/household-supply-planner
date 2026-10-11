@@ -10,6 +10,11 @@ import argparse
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sys
+
+# Script invocation sets sys.path[0] to tests/, while examples/ is at repo root.
+# Keep the fixture's import boundary local to the test subprocess only.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from examples.m11_local_web import (
     CurrentDemoMarketProvider, build_demo_app, build_demo_catalog,

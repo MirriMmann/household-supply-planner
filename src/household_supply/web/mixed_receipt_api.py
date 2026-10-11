@@ -84,9 +84,6 @@ class MixedReceiptWebApi:
                     )
                     if sku is None:
                         raise JsonPayloadError("receipt SKU not present in catalog")
-                    quantity = sku.package_quantity * packs if hasattr(
-                        sku.package_quantity, "__mul__"
-                    ) else None
                     # No implicit unit arithmetic: explicit exact decimal
                     # multiplication reproduces canonical sold pack quantity.
                     from household_supply.domain import Quantity

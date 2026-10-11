@@ -767,6 +767,13 @@ def mixed_receipt_review_mobile(browser) -> None:
         wait.until(lambda d: not mixed_panel.get_attribute("hidden"))
         transfer = browser.find_element(By.ID, "shopping-to-mixed-recipe")
         assert not transfer.get_attribute("hidden")
+        readiness = browser.find_element(By.ID, "shopping-readiness-panel")
+        readiness_summary = readiness.find_element(By.TAG_NAME, "summary")
+        browser.execute_script(
+            "arguments[0].scrollIntoView({block: 'center', behavior: 'instant'});",
+            readiness_summary,
+        )
+        readiness_summary.click()
         Select(browser.find_element(By.ID, "shopping-recipe-select")).select_by_value(
             "kg-kuurdak-beef"
         )
